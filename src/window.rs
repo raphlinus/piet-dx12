@@ -83,7 +83,7 @@ impl DpiFunctions {
         }
     }
 
-    pub fn enable_non_client_dpi_scaling(&self, hwnd: HWND) {
+    pub fn enable_non_client_dpi_scaling(&self, hwnd: winapi::shared::windef::HWND) {
         unsafe {
             if let Some(enable_nonclient_dpi_scaling) = self.enable_nonclient_dpi_scaling {
                 enable_nonclient_dpi_scaling(hwnd);
@@ -108,7 +108,7 @@ impl DpiFunctions {
         None
     }*/
 
-    pub fn hwnd_dpi_factor(&self, hwnd: HWND) -> f32 {
+    pub fn hwnd_dpi_factor(&self, hwnd: winapi::shared::windef::HWND) -> f32 {
         unsafe {
             let hdc = winuser::GetDC(hwnd);
             if hdc.is_null() {
@@ -130,7 +130,7 @@ impl DpiFunctions {
                 else {
                     let mut dpi_x = 0;
                     let mut dpi_y = 0;
-                    if get_dpi_for_monitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == winapi::shared::winerror::S_OK {
+                    if get_dpi_for_monitor(monitor, winapi::um::shellscalingapi::MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == winapi::shared::winerror::S_OK {
                         dpi_x as u32
                     } else {
                         BASE_DPI
@@ -154,6 +154,12 @@ impl DpiFunctions {
         }
     }
 
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct Vec2 {
+    x: f32,
+    y: f32,
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
@@ -224,7 +230,7 @@ impl Window {
 
     pub fn get_is_topmost(&self) -> bool {
         unsafe {
-            let ex_style = winuser::GetWindowLongW(self.hwnd.unwrap(), winuser::GWL_EXSTYLE) as u32;
+            let ex_style = winuser::GetWindowLongW(self.hwnd, winuser::GWL_EXSTYLE) as u32;
             if (ex_style & winuser::WS_EX_TOPMOST) != 0 {
                 return true
             }
@@ -236,7 +242,7 @@ impl Window {
         unsafe {
             let mut wp: winuser::WINDOWPLACEMENT = std::mem::uninitialized();
             wp.length = std::mem::size_of::<winuser::WINDOWPLACEMENT>() as u32;
-            winuser::GetWindowPlacement(self.hwnd.unwrap(), &mut wp);
+            winuser::GetWindowPlacement(self.hwnd, &mut wp);
             if wp.showCmd as i32 == winuser::SW_MAXIMIZE {
                 return true
             }
@@ -246,16 +252,16 @@ impl Window {
 
     pub fn get_position(&self) -> Vec2 {
         unsafe {
-            let mut rect = RECT {left: 0, top: 0, bottom: 0, right: 0};
-            winuser::GetWindowRect(self.hwnd.unwrap(), &mut rect);
+            let mut rect = winapi::shared::windef::RECT {left: 0, top: 0, bottom: 0, right: 0};
+            winuser::GetWindowRect(self.hwnd, &mut rect);
             Vec2 {x: rect.left as f32, y: rect.top as f32}
         }
     }
 
     pub fn get_inner_size(&self) -> Vec2 {
         unsafe {
-            let mut rect = RECT {left: 0, top: 0, bottom: 0, right: 0};
-            winuser::GetClientRect(self.hwnd.unwrap(), &mut rect);
+            let mut rect = winapi::shared::windef::RECT {left: 0, top: 0, bottom: 0, right: 0};
+            winuser::GetClientRect(self.hwnd, &mut rect);
             let dpi = self.get_dpi_factor();
             Vec2 {x: (rect.right - rect.left) as f32 / dpi, y: (rect.bottom - rect.top)as f32 / dpi}
         }
@@ -263,15 +269,15 @@ impl Window {
 
     pub fn get_outer_size(&self) -> Vec2 {
         unsafe {
-            let mut rect = RECT {left: 0, top: 0, bottom: 0, right: 0};
-            winuser::GetWindowRect(self.hwnd.unwrap(), &mut rect);
+            let mut rect = winapi::shared::windef::RECT {left: 0, top: 0, bottom: 0, right: 0};
+            winuser::GetWindowRect(self.hwnd, &mut rect);
             Vec2 {x: (rect.right - rect.left) as f32, y: (rect.bottom - rect.top)as f32}
         }
     }
 
     pub fn get_dpi_factor(&self) -> f32 {
         unsafe {
-            (*self).dpi_functions.hwnd_dpi_factor(self.hwnd.unwrap())
+            (*self).dpi_functions.hwnd_dpi_factor(self.hwnd)
         }
     }
 

@@ -1,6 +1,7 @@
 // #![windows_subsystem = "windows"] (I think I want the console)
 pub mod window;
 pub mod gpu;
+pub mod error_utils;
 
 fn main() {
     unsafe {

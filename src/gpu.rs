@@ -1,7 +1,9 @@
 extern crate winapi;
 extern crate d3d12;
 
+use winapi::Interface;
 use crate::window;
+use crate::error_utils::error_if_failed;
 
 const FRAME_COUNT: u32 = 2;
 
@@ -31,11 +33,9 @@ struct GpuState {
     fence_value: u64,
 }
 
-
-
 impl GpuState {
-    fn new(width: u32, height: u32, name: &str) {
-        GpuState::load_pipeline(width, height);
+    fn new(width: u32, height: u32, name: &str, wnd: window::Window) {
+        GpuState::load_pipeline(width, height, wnd);
         GpuState::load_assets();
     }
 
@@ -51,25 +51,39 @@ impl GpuState {
 
     }
 
-    fn create_device(factory: d3d12::dxgi::Factory4) -> d3d12::Device {
+    unsafe fn create_device(factory4: &d3d12::dxgi::Factory4) -> Result<d3d12::Device, Vec<winapi::shared::winerror::HRESULT>> {
         let mut id = 0;
+        let mut errors: Vec<winapi::shared::winerror::HRESULT> = Vec::new();
+
         loop {
-            let (adapter, hr) = factory.enumerate_adapters(id);
-            if hr == winapi::shared::winerror::DXGI_ERROR_NOT_FOUND {
-                panic!("unable to find adapter")
-            }
+            let adapter = match error_if_failed(factory4.enumerate_adapters(id)) {
+                Ok(a) => {
+                    a
+                },
+                Err(hr) => {
+                    errors.push(hr);
+                    return Err(errors);
+                }
+            };
+            
             id += 1;
 
-            let (device, hr) = d3d12::Device::create(adapter, d3d12::FeatureLevel::L12_0);
-            if !winapi::shared::winerror::SUCCEEDED(hr) {
-                continue;
+            match error_if_failed(d3d12::Device::create(adapter, d3d12::FeatureLevel::L12_0)) {
+                Ok(device) => {
+                    adapter.destroy();
+                    return Ok(device);
+                },
+                Err(hr) => {
+                    errors.push(hr);
+                    continue;
+                }
             }
-            unsafe { adapter.destroy() };
-            return device;
         }
+
+        Err(errors)
     }
 
-    fn load_pipeline(width: u32, height: u32, wnd: crate::window::Window) {
+    fn load_pipeline(width: u32, height: u32, wnd: window::Window) {
         #[cfg(debug_assertions)]
         // Enable debug layer
         {
@@ -77,7 +91,7 @@ impl GpuState {
             let mut debug_controller: *mut winapi::um::d3d12sdklayers::ID3D12Debug = std::ptr::null_mut();
             let hr = unsafe {
                 winapi::um::d3d12::D3D12GetDebugInterface(
-                    &d3d12sdklayers::ID3D12Debug::uuidof(),
+                    &winapi::um::d3d12sdklayers::ID3D12Debug::uuidof(),
                     &mut debug_controller as *mut *mut _ as *mut *mut _,
                 )
             };
@@ -91,10 +105,21 @@ impl GpuState {
         }
 
         // create factory4
-        let mut factory4 = d3d12::dxgi::Factory4::create(d3d12::dxgi::FactoryCreationFlags::DEBUG);
+        let mut factory4 = error_if_failed(d3d12::dxgi::Factory4::create(d3d12::dxgi::FactoryCreationFlags::DEBUG)).expect("could not create factory4");
 
         // create device
-        let device = create_device(factory4);
+        let device = match GpuState::create_device(&factory4) {
+            Ok(device) => {
+                device
+            },
+            Err(hr) => {
+                if hr == winapi::shared::winerror::DXGI_ERROR_NOT_FOUND {
+                    panic!("could not find adapter");
+                } else {
+                    panic!("could not find dx12 capable device");
+                }
+            }
+        };
 
         let command_queue = device.create_command_queue(d3d12::command_list::CmdListType::Direct, d3d12::queue::Priority::Normal, d3d12::queue::CommandQueueFlags::empty(), 0);
 
@@ -102,7 +127,7 @@ impl GpuState {
         let swapchain_desc = d3d12::dxgi::SwapchainDesc {
             width,
             height,
-            format: d3d12::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
             stereo: false,
             sample: d3d12::SampleDesc{
                 count: 1,
