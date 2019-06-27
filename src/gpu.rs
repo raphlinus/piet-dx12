@@ -75,7 +75,7 @@ impl GpuState {
         let mut factory4 = d3d12::error_if_failed(d3d12::Factory4::create(winapi::shared::dxgi1_3::DXGI_CREATE_FACTORY_DEBUG)).expect("could not create factory4");
 
         // create device
-        let device = match GpuState::create_device(&factory4) {
+        let device = match d3d12::Device::create_device(&factory4) {
             Ok(device) => {
                 device
             },
@@ -108,32 +108,33 @@ impl GpuState {
             SwapEffect: winapi::shared::dxgi::DXGI_SWAP_EFFECT_DISCARD,
         };
 
-        let swap_chain1 = factory4.as_factory2().create_swapchain_for_hwnd(command_queue.clone(), wnd.hwnd.clone(), swapchain_desc);
-        let swap_chain3 = d3d12::error_if_failed(swap_chain1.cast::<winapi::shared::dxgi1_4::IDXGISwapChain3>()).expect("could not down cast swap_chain1 into swapchain_3");
+        let swap_chain1 = d3d12::error_if_failed(factory4.as_factory2().create_swapchain_for_hwnd(command_queue.clone(), wnd.hwnd.clone(), swapchain_desc)).expect("could not create swap chain 1");
+        let swap_chain3 = swap_chain1.cast_into_swap_chain3();
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?
-        factory4.MakeWindowAssociation(wnd.hwnd, 1);
+        factory4.0.MakeWindowAssociation(wnd.hwnd, 1);
 
         let frame_index = swap_chain3.get_current_back_buffer_index();
 
         // create descriptor heap
-        let render_target_view_desc = winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+        let descriptor_heap_desc = winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
             NumDescriptors: FRAME_COUNT,
             Flags: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
             NodeMask: 0,
         };
-        let descriptor_heap = device.create_descriptor_heap(&render_target_view_desc);
+        let descriptor_heap = d3d12::error_if_failed(device.create_descriptor_heap(&descriptor_heap_desc)).expect("could not create descriptor heap");
         let rtv_descriptor_size = device.get_descriptor_increment_size(winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
         // create frame resources
-        let cpu_descriptor = descriptor_heap.start_cpu_descriptor();
+        let mut cpu_descriptor = descriptor_heap.start_cpu_descriptor();
         // create render target and render target view for each frame
         let mut render_targets: Vec<d3d12::Resource> = Vec::new();
         for ix in 0..FRAME_COUNT {
-            let resource = d3d12::error_if_failed(swap_chain3.get_buffer()).expect("could not create render target resource");
-            device.create_render_target_view(resource.clone(), &render_target_view_desc, cpu_descriptor);
-            cpu_descriptor.Offset(1, rtv_descriptor_size);
+            let resource = d3d12::error_if_failed(swap_chain3.get_buffer(ix)).expect("could not create render target resource");
+            device.create_render_target_view(resource.clone(), std::ptr::null(), cpu_descriptor);
+            // TODO: is this correct?
+            cpu_descriptor.ptr += rtv_descriptor_size as usize;
             render_targets.push(resource.clone());
         }
     }
