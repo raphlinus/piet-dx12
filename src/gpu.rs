@@ -3,7 +3,6 @@ extern crate d3d12;
 
 use winapi::Interface;
 use crate::window;
-use crate::error_utils::error_if_failed;
 
 const FRAME_COUNT: u32 = 2;
 
@@ -34,7 +33,7 @@ struct GpuState {
 }
 
 impl GpuState {
-    fn new(width: u32, height: u32, name: &str, wnd: window::Window) {
+    unsafe fn new(width: u32, height: u32, name: &str, wnd: window::Window) {
         GpuState::load_pipeline(width, height, wnd);
         GpuState::load_assets();
     }
@@ -51,39 +50,7 @@ impl GpuState {
 
     }
 
-    unsafe fn create_device(factory4: &d3d12::dxgi::Factory4) -> Result<d3d12::Device, Vec<winapi::shared::winerror::HRESULT>> {
-        let mut id = 0;
-        let mut errors: Vec<winapi::shared::winerror::HRESULT> = Vec::new();
-
-        loop {
-            let adapter = match error_if_failed(factory4.enumerate_adapters(id)) {
-                Ok(a) => {
-                    a
-                },
-                Err(hr) => {
-                    errors.push(hr);
-                    return Err(errors);
-                }
-            };
-            
-            id += 1;
-
-            match error_if_failed(d3d12::Device::create(adapter, d3d12::FeatureLevel::L12_0)) {
-                Ok(device) => {
-                    adapter.destroy();
-                    return Ok(device);
-                },
-                Err(hr) => {
-                    errors.push(hr);
-                    continue;
-                }
-            }
-        }
-
-        Err(errors)
-    }
-
-    fn load_pipeline(width: u32, height: u32, wnd: window::Window) {
+    unsafe fn load_pipeline(width: u32, height: u32, wnd: window::Window) {
         #[cfg(debug_assertions)]
         // Enable debug layer
         {
@@ -113,7 +80,7 @@ impl GpuState {
                 device
             },
             Err(hr) => {
-                if hr == winapi::shared::winerror::DXGI_ERROR_NOT_FOUND {
+                if hr[0] == winapi::shared::winerror::DXGI_ERROR_NOT_FOUND {
                     panic!("could not find adapter");
                 } else {
                     panic!("could not find dx12 capable device");
@@ -121,7 +88,7 @@ impl GpuState {
             }
         };
 
-        let command_queue = device.create_command_queue(d3d12::command_list::CmdListType::Direct, d3d12::queue::Priority::Normal, d3d12::queue::CommandQueueFlags::empty(), 0);
+        let command_queue = error_if_failed(device.create_command_queue(d3d12::command_list::CmdListType::Direct, d3d12::queue::Priority::Normal, d3d12::queue::CommandQueueFlags::empty(), 0)).expect("could not create command queue");
 
         // create swapchain
         let swapchain_desc = d3d12::dxgi::SwapchainDesc {
@@ -141,14 +108,12 @@ impl GpuState {
             flags: 0,
         };
 
-        let factory2 = factory4.as_factory2();
-        let swapchain = factory2.create_swapchain_for_hwnd(command_queue, wnd.hwnd, &swapchain_desc);
-
+        let swapchain = factory4.
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?
         factory4.MakeWindowAssociation(wnd.hwnd, 1);
 
-        let frame_index = swapchain.get_current_back_buffer_index();
+        let frame_index = swapchain1.get_current_back_buffer_index();
 
         // create descriptor heap
         let descriptor_heap = device.create_descriptor_heap(FRAME_COUNT, d3d12::descriptor::HeapType::Rtv, d3d12::descriptor::HeapFlags::empty());
@@ -160,10 +125,9 @@ impl GpuState {
         // create render target and render target view for each frame
         let mut render_targets: Vec<d3d12::resource::Resource> = Vec::new();
         for ix in 0..FRAME_COUNT {
-            let resource = swapchain.as_swapchain0().get_buffer().unwrap();
+            let resource = swapchain1.as_swapchain0().get_buffer().unwrap();
             device.create_render_target_view(resource, &render_target_view_desc, cpu_descriptor);
             render_targets.push(resource);
-
         }
     }
 

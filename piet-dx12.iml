@@ -7,6 +7,11 @@
       <sourceFolder url="file://$MODULE_DIR$/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/src/d3d12/d3d12/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/src/d3d12/d3d12/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/src/d3d12/d3d12/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/src/d3d12/d3d12/benches" isTestSource="true" />
+      <excludeFolder url="file://$MODULE_DIR$/src/d3d12/d3d12/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />
