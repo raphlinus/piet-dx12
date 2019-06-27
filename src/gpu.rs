@@ -22,13 +22,13 @@ struct GpuState {
     rtv_descriptor_size: usize,
 
     // "app" stuff?
-    vertex_buffer: d3d12::resource::Resource,
-    vertex_buffer_view: Vec<d3d12::WeakPtr<winapi::um::d3d12::D3D12_VERTEX_BUFFER_VIEW>>,
+    vertex_buffer: d3d12::Resource,
+    vertex_buffer_view: Vec<d3d12::VertexBufferView>,
 
     // synchronizers
     frame_index: usize,
-    fence_event: d3d12::sync::Event,
-    fence: d3d12::sync::Fence,
+    fence_event: d3d12::Event,
+    fence: d3d12::Fence,
     fence_value: u64,
 }
 
@@ -72,7 +72,7 @@ impl GpuState {
         }
 
         // create factory4
-        let mut factory4 = d3d12::error_if_failed(d3d12::dxgi::Factory4::create(winapi::shared::dxgi1_3::DXGI_CREATE_FACTORY_DEBUG)).expect("could not create factory4");
+        let mut factory4 = d3d12::error_if_failed(d3d12::Factory4::create(winapi::shared::dxgi1_3::DXGI_CREATE_FACTORY_DEBUG)).expect("could not create factory4");
 
         // create device
         let device = match GpuState::create_device(&factory4) {
@@ -88,28 +88,28 @@ impl GpuState {
             }
         };
 
-        let command_queue = d3d12::error_if_failed(device.create_command_queue(d3d12::command_list::CmdListType::Direct, d3d12::queue::Priority::Normal, d3d12::queue::CommandQueueFlags::empty(), 0)).expect("could not create command queue");
+        let command_queue = d3d12::error_if_failed(device.create_command_queue(winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT, 0, winapi::um::d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE, 0)).expect("could not create command queue");
 
         // create swapchain
-        let swapchain_desc = winapi::um::dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
-            AlphaMode: desc.alpha_mode as _,
+        let swapchain_desc = winapi::shared::dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
+            AlphaMode: winapi::shared::dxgi1_2::DXGI_ALPHA_MODE_UNSPECIFIED,
             BufferCount: FRAME_COUNT,
             Width: width,
             Height: height,
             Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
             Flags: 0,
             BufferUsage: winapi::shared::dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
-            SampleDesc: DXGI_SAMPLE_DESC {
+            SampleDesc: winapi::shared::dxgitype::DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
             },
             Scaling: winapi::shared::dxgitype::DXGI_MODE_SCALING_CENTERED,
-            Stereo: winapi::shared::ntdef::FALSE,
+            Stereo: winapi::shared::minwindef::FALSE,
             SwapEffect: winapi::shared::dxgi::DXGI_SWAP_EFFECT_DISCARD,
         };
 
         let swap_chain1 = factory4.as_factory2().create_swapchain_for_hwnd(command_queue.clone(), wnd.hwnd.clone(), swapchain_desc);
-        let swap_chain3 = d3d12::error_if_failed(swap_chain1.cast::<winapi::um::dxgi1_4::IDXGISwapChain3>());
+        let swap_chain3 = d3d12::error_if_failed(swap_chain1.cast::<winapi::shared::dxgi1_4::IDXGISwapChain3>()).expect("could not down cast swap_chain1 into swapchain_3");
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?
         factory4.MakeWindowAssociation(wnd.hwnd, 1);
@@ -117,18 +117,24 @@ impl GpuState {
         let frame_index = swap_chain3.get_current_back_buffer_index();
 
         // create descriptor heap
-        let descriptor_heap = device.create_descriptor_heap(FRAME_COUNT, d3d12::descriptor::HeapType::Rtv, d3d12::descriptor::HeapFlags::empty());
-
-        let rtv_descriptor_size = device.get_descriptor_increment_size(d3d12::descriptor::HeapType::Rtv);
+        let render_target_view_desc = winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+            NumDescriptors: FRAME_COUNT,
+            Flags: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+            NodeMask: 0,
+        };
+        let descriptor_heap = device.create_descriptor_heap(&render_target_view_desc);
+        let rtv_descriptor_size = device.get_descriptor_increment_size(winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
         // create frame resources
         let cpu_descriptor = descriptor_heap.start_cpu_descriptor();
         // create render target and render target view for each frame
-        let mut render_targets: Vec<d3d12::resource::Resource> = Vec::new();
+        let mut render_targets: Vec<d3d12::Resource> = Vec::new();
         for ix in 0..FRAME_COUNT {
-            let resource = swap_chain3.get_buffer().unwrap();
-            device.create_render_target_view(resource, &render_target_view_desc, cpu_descriptor);
-            render_targets.push(resource);
+            let resource = d3d12::error_if_failed(swap_chain3.get_buffer()).expect("could not create render target resource");
+            device.create_render_target_view(resource.clone(), &render_target_view_desc, cpu_descriptor);
+            cpu_descriptor.Offset(1, rtv_descriptor_size);
+            render_targets.push(resource.clone());
         }
     }
 

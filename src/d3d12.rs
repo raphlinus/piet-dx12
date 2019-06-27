@@ -8,13 +8,14 @@ pub type D3DResult<T> = (T, winapi::shared::winerror::HRESULT);
 pub type Heap = wio::com::ComPtr<winapi::um::d3d12::ID3D12Heap>;
 pub type Subresource = u32;
 pub type Resource = wio::com::ComPtr<winapi::um::d3d12::ID3D12Resource>;
+pub type VertexBufferView = wio::com::ComPtr<winapi::um::d3d12::D3D12_VERTEX_BUFFER_VIEW>;
 
 pub type Adapter1 = wio::com::ComPtr<winapi::shared::dxgi::IDXGIAdapter1>;
 pub type Factory2 = wio::com::ComPtr<winapi::shared::dxgi1_2::IDXGIFactory2>;
 pub type Factory4 = wio::com::ComPtr<winapi::shared::dxgi1_4::IDXGIFactory4>;
-pub type SwapChain = wio::com::ComPtr<dxgi::IDXGISwapChain>;
-pub type SwapChain1 = wio::com::ComPtr<dxgi1_2::IDXGISwapChain1>;
-pub type SwapChain3 = wio::com::ComPtr<dxgi1_4::IDXGISwapChain3>;
+pub type SwapChain = wio::com::ComPtr<winapi::shared::dxgi::IDXGISwapChain>;
+pub type SwapChain1 = wio::com::ComPtr<winapi::shared::dxgi1_2::IDXGISwapChain1>;
+pub type SwapChain3 = wio::com::ComPtr<winapi::shared::dxgi1_4::IDXGISwapChain3>;
 
 pub type QueryHeap = wio::com::ComPtr<winapi::um::d3d12::ID3D12QueryHeap>;
 
@@ -39,6 +40,21 @@ pub type CommandSignature = wio::com::ComPtr<winapi::um::d3d12::ID3D12CommandSig
 pub type CommandList = wio::com::ComPtr<winapi::um::d3d12::ID3D12CommandList>;
 pub type GraphicsCommandList = wio::com::ComPtr<winapi::um::d3d12::ID3D12GraphicsCommandList>;
 
+pub struct Event(pub winapi::um::winnt::HANDLE);
+pub type Fence = wio::com::ComPtr<winapi::um::d3d12::ID3D12Fence>;
+
+pub type PipelineState = wio::com::ComPtr<winapi::um::d3d12::ID3D12PipelineState>;
+
+pub struct Shader(winapi::um::d3d12::D3D12_SHADER_BYTECODE);
+pub struct CachedPSO(winapi::um::d3d12::D3D12_CACHED_PIPELINE_STATE);
+
+pub type Blob = wio::com::ComPtr<winapi::um::d3dcommon::ID3DBlob>;
+
+pub type ErrorBlob = wio::com::ComPtr<winapi::um::d3dcommon::ID3DBlob>;
+
+#[repr(transparent)]
+pub struct IndirectArgument(winapi::um::d3d12::D3D12_INDIRECT_ARGUMENT_DESC);
+
 #[repr(transparent)]
 pub struct RenderTargetViewDesc(winapi::um::d3d12::D3D12_RENDER_TARGET_VIEW_DESC);
 
@@ -61,7 +77,7 @@ impl Factory2 {
         &self,
         queue: CommandQueue,
         hwnd: winapi::shared::windef::HWND,
-        desc: winapi::um::dxgi1_2::DXGI_SWAP_CHAIN_DESC1,
+        desc: winapi::shared::dxgi1_2::DXGI_SWAP_CHAIN_DESC1,
     ) -> D3DResult<SwapChain1> {
         let mut swap_chain = std::ptr::null_mut();
         let hr = unsafe {
@@ -84,9 +100,9 @@ impl Factory4 {
     pub fn create(flags: winapi::shared::minwindef::UINT) -> D3DResult<Self> {
         let mut factory = std::ptr::null_mut();
         let hr = unsafe {
-            winapi::um::dxgi1_3::CreateDXGIFactory2(
+            winapi::shared::dxgi1_3::CreateDXGIFactory2(
                 flags,
-                &dxgi1_4::IDXGIFactory4::uuidof(),
+                &winapi::shared::dxgi1_4::IDXGIFactory4::uuidof(),
                 factory.mut_void() as *mut *mut _,
             )
         };
@@ -169,7 +185,7 @@ unsafe fn create_device(factory4: &Factory4) -> Result<wio::com::ComPtr<winapi::
 
         id += 1;
 
-        match error_if_failed(d3d12::Device::create(adapter, d3d12::FeatureLevel::L12_0)) {
+        match error_if_failed(Device::create(adapter, winapi::um::d3dcommon::D3D_FEATURE_LEVEL_12_0)) {
             Ok(device) => {
                 adapter.destroy();
                 return Ok(device);
@@ -185,14 +201,14 @@ unsafe fn create_device(factory4: &Factory4) -> Result<wio::com::ComPtr<winapi::
 impl Device {
     pub fn create<I: winapi::Interface>(
         adapter: wio::com::ComPtr<I>,
-        feature_level: FeatureLevel,
+        feature_level: winapi::um::d3dcommon::D3D_FEATURE_LEVEL,
     ) -> D3DResult<Self> {
         let mut device = Device::null();
         let hr = unsafe {
             winapi::um::d3d12::D3D12CreateDevice(
                 adapter.as_unknown() as *const _ as *mut _,
-                feature_level as _,
-                &d3d12::ID3D12Device::uuidof(),
+                feature_level,
+                &winapi::um::d3d12::ID3D12Device::uuidof(),
                 device.mut_void(),
             )
         };
@@ -200,13 +216,13 @@ impl Device {
         (device, hr)
     }
 
-    pub fn create_command_allocator(&self, list_type: CmdListType) -> D3DResult<CommandAllocator> {
+    pub fn create_command_allocator(&self, list_type: winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE) -> D3DResult<CommandAllocator> {
         let mut allocator = CommandAllocator::null();
         let hr = unsafe {
             self.CreateCommandAllocator(
-                list_type as _,
-                &d3d12::ID3D12CommandAllocator::uuidof(),
-                allocator.mut_void(),
+                list_type,
+                &winapi::um::d3d12::ID3D12CommandAllocator::uuidof(),
+                allocator.mut_void() as *mut *mut _,
             )
         };
 
@@ -215,24 +231,24 @@ impl Device {
 
     pub fn create_command_queue(
         &self,
-        list_type: CmdListType,
-        priority: queue::Priority,
-        flags: queue::CommandQueueFlags,
-        node_mask: NodeMask,
+        list_type: winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE,
+        priority: winapi::shared::minwindef::INT,
+        flags: winapi::um::d3d12::D3D12_COMMAND_QUEUE_FLAGS,
+        node_mask: winapi::shared::minwindef::UINT,
     ) -> D3DResult<CommandQueue> {
         let desc = winapi::um::d3d12::D3D12_COMMAND_QUEUE_DESC {
-            Type: list_type as _,
-            Priority: priority as _,
-            Flags: flags.bits(),
+            Type: list_type,
+            Priority: priority,
+            Flags: flags,
             NodeMask: node_mask,
         };
 
-        let mut queue = CommandQueue::null();
+        let mut queue = std::ptr::null_mut;
         let hr = unsafe {
             self.CreateCommandQueue(
                 &desc,
-                &d3d12::ID3D12CommandQueue::uuidof(),
-                queue.mut_void(),
+                &winapi::um::d3d12::ID3D12CommandQueue::uuidof(),
+                queue.mut_void() as *mut *mut _,
             )
         };
 
@@ -241,52 +257,41 @@ impl Device {
 
     pub fn create_descriptor_heap(
         &self,
-        num_descriptors: u32,
-        heap_type: HeapType,
-        flags: HeapFlags,
-        node_mask: NodeMask,
+        heap_description: &winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_DESC,
     ) -> D3DResult<DescriptorHeap> {
-        let desc = winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
-            Type: heap_type as _,
-            NumDescriptors: num_descriptors,
-            Flags: flags.bits(),
-            NodeMask: node_mask,
-        };
-
-        let mut heap = DescriptorHeap::null();
+        let mut heap = std::ptr::null_mut();
         let hr = unsafe {
             self.CreateDescriptorHeap(
-                &desc,
-                &d3d12::ID3D12DescriptorHeap::uuidof(),
-                heap.mut_void(),
+                heap_description,
+                &winapi::um::d3d12::ID3D12DescriptorHeap::uuidof(),
+                heap.mut_void() as *mut *mut _,
             )
         };
 
         (heap, hr)
     }
 
-    pub fn get_descriptor_increment_size(&self, heap_type: HeapType) -> u32 {
-        unsafe { self.GetDescriptorHandleIncrementSize(heap_type as _) }
+    pub fn get_descriptor_increment_size(&self, heap_type: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE) -> u32 {
+        unsafe { self.GetDescriptorHandleIncrementSize(heap_type) }
     }
 
-    pub fn create_graphics_command_list(
+    pub unsafe fn create_graphics_command_list(
         &self,
-        list_type: CmdListType,
+        list_type: winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE,
         allocator: CommandAllocator,
         initial: PipelineState,
-        node_mask: NodeMask,
+        node_mask: winapi::shared::minwindef::UINT,
     ) -> D3DResult<GraphicsCommandList> {
-        let mut command_list = GraphicsCommandList::null();
-        let hr = unsafe {
+        let mut command_list = std::ptr::null_mut();
+        let hr =
             self.CreateCommandList(
                 node_mask,
-                list_type as _,
+                list_type,
                 allocator.as_mut_ptr(),
                 initial.as_mut_ptr(),
-                &d3d12::ID3D12GraphicsCommandList::uuidof(),
-                command_list.mut_void(),
-            )
-        };
+                &winapi::um::d3d12::ID3D12GraphicsCommandList::uuidof(),
+                command_list.mut_void() as *mut *mut _,
+            );
 
         (command_list, hr)
     }
@@ -295,24 +300,24 @@ impl Device {
         &self,
         root_signature: RootSignature,
         cs: Shader,
-        node_mask: NodeMask,
+        node_mask: winapi::shared::minwindef::UINT,
         cached_pso: CachedPSO,
-        flags: pso::PipelineStateFlags,
+        flags: winapi::um::d3d12::D3D12_PIPELINE_STATE_FLAGS,
     ) -> D3DResult<PipelineState> {
-        let mut pipeline = PipelineState::null();
+        let mut pipeline = std::ptr::null_mut();
         let desc = winapi::um::d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: root_signature.as_mut_ptr(),
             CS: *cs,
             NodeMask: node_mask,
             CachedPSO: *cached_pso,
-            Flags: flags.bits(),
+            Flags: flags,
         };
 
         let hr = unsafe {
             self.CreateComputePipelineState(
                 &desc,
-                &d3d12::ID3D12PipelineState::uuidof(),
-                pipeline.mut_void(),
+                &winapi::um::d3d12::ID3D12PipelineState::uuidof(),
+                pipeline.mut_void() as *mut *mut _,
             )
         };
 
@@ -322,16 +327,16 @@ impl Device {
     pub fn create_root_signature(
         &self,
         blob: Blob,
-        node_mask: NodeMask,
+        node_mask: winapi::shared::minwindef::UINT,
     ) -> D3DResult<RootSignature> {
-        let mut signature = RootSignature::null();
+        let mut signature = std::ptr::null_mut();
         let hr = unsafe {
             self.CreateRootSignature(
                 node_mask,
                 blob.GetBufferPointer(),
                 blob.GetBufferSize(),
-                &d3d12::ID3D12RootSignature::uuidof(),
-                signature.mut_void(),
+                &winapi::um::d3d12::ID3D12RootSignature::uuidof(),
+                signature.mut_void() as *mut *mut _,
             )
         };
 
@@ -343,9 +348,9 @@ impl Device {
         root_signature: RootSignature,
         arguments: &[IndirectArgument],
         stride: u32,
-        node_mask: NodeMask,
+        node_mask: winapi::shared::minwindef::UINT,
     ) -> D3DResult<CommandSignature> {
-        let mut signature = CommandSignature::null();
+        let mut signature = std::ptr::null_mut();
         let desc = winapi::um::d3d12::D3D12_COMMAND_SIGNATURE_DESC {
             ByteStride: stride,
             NumArgumentDescs: arguments.len() as _,
@@ -357,8 +362,8 @@ impl Device {
             self.CreateCommandSignature(
                 &desc,
                 root_signature.as_mut_ptr(),
-                &d3d12::ID3D12CommandSignature::uuidof(),
-                signature.mut_void(),
+                &winapi::um::d3d12::ID3D12CommandSignature::uuidof(),
+                signature.mut_void() as *mut *mut _,
             )
         };
 
@@ -368,11 +373,11 @@ impl Device {
     pub fn create_render_target_view(
         &self,
         resource: Resource,
-        desc: &RenderTargetViewDesc,
+        desc: &winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_DESC,
         descriptor: CpuDescriptor,
     ) {
         unsafe {
-            self.CreateRenderTargetView(resource.as_mut_ptr(), &desc.0 as *const _, descriptor);
+            self.CreateRenderTargetView(resource.as_mut_ptr(), &desc as *const _, descriptor);
         }
     }
 
@@ -383,7 +388,7 @@ impl Device {
             self.CreateFence(
                 initial,
                 winapi::um::d3d12::D3D12_FENCE_FLAG_NONE,
-                &d3d12::ID3D12Fence::uuidof(),
+                &winapi::um::d3d12::ID3D12Fence::uuidof(),
                 fence.mut_void(),
             )
         };
@@ -395,11 +400,6 @@ impl Device {
 
 
 impl CommandAllocator {
-}
-
-pub struct Binding {
-    pub register: u32,
-    pub space: u32,
 }
 
 
@@ -419,11 +419,6 @@ impl DescriptorRange {
 pub struct RootParameter(winapi::um::d3d12::D3D12_ROOT_PARAMETER);
 impl RootParameter {
 }
-
-
-impl StaticSampler {
-}
-
 
 
 impl RootSignature {

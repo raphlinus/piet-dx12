@@ -1,8 +1,4 @@
 // #![windows_subsystem = "windows"] (I think I want the console)
-
-#[macro_use]
-extern crate bitflags;
-
 pub mod window;
 pub mod gpu;
 pub mod d3d12;
