@@ -1,8 +1,8 @@
 extern crate winapi;
-extern crate d3d12;
 
 use winapi::Interface;
 use crate::window;
+use crate::d3d12;
 
 const FRAME_COUNT: u32 = 2;
 
@@ -10,15 +10,15 @@ struct GpuState {
     // pipeline stuff
     viewport: winapi::um::d3d12::D3D12_VIEWPORT,
     scissor_rect: winapi::um::d3d12::D3D12_RECT,
-    swapchain: d3d12::dxgi::SwapChain3,
-    device: d3d12::device::Device,
-    render_targets: Vec<d3d12::resource::Resource>,
-    command_allocator: d3d12::command_allocator::CommandAllocator,
-    command_queue: d3d12::queue::CommandQueue,
-    roots_signature: d3d12::descriptor::RootSignature,
-    rtv_heap: d3d12::descriptor::DescriptorHeap,
-    pipeline_state: d3d12::pso::PipelineState,
-    command_list: d3d12::command_list::GraphicsCommandList,
+    swapchain: d3d12::SwapChain3,
+    device: d3d12::Device,
+    render_targets: Vec<d3d12::Resource>,
+    command_allocator: d3d12::CommandAllocator,
+    command_queue: d3d12::CommandQueue,
+    roots_signature: d3d12::RootSignature,
+    rtv_heap: d3d12::DescriptorHeap,
+    pipeline_state: d3d12::PipelineState,
+    command_list: d3d12::GraphicsCommandList,
     rtv_descriptor_size: usize,
 
     // "app" stuff?
@@ -72,7 +72,7 @@ impl GpuState {
         }
 
         // create factory4
-        let mut factory4 = error_if_failed(d3d12::dxgi::Factory4::create(d3d12::dxgi::FactoryCreationFlags::DEBUG)).expect("could not create factory4");
+        let mut factory4 = d3d12::error_if_failed(d3d12::dxgi::Factory4::create(winapi::shared::dxgi1_3::DXGI_CREATE_FACTORY_DEBUG)).expect("could not create factory4");
 
         // create device
         let device = match GpuState::create_device(&factory4) {
@@ -88,32 +88,33 @@ impl GpuState {
             }
         };
 
-        let command_queue = error_if_failed(device.create_command_queue(d3d12::command_list::CmdListType::Direct, d3d12::queue::Priority::Normal, d3d12::queue::CommandQueueFlags::empty(), 0)).expect("could not create command queue");
+        let command_queue = d3d12::error_if_failed(device.create_command_queue(d3d12::command_list::CmdListType::Direct, d3d12::queue::Priority::Normal, d3d12::queue::CommandQueueFlags::empty(), 0)).expect("could not create command queue");
 
         // create swapchain
-        let swapchain_desc = d3d12::dxgi::SwapchainDesc {
-            width,
-            height,
-            format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-            stereo: false,
-            sample: d3d12::SampleDesc{
-                count: 1,
-                quality: 0,
+        let swapchain_desc = winapi::um::dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
+            AlphaMode: desc.alpha_mode as _,
+            BufferCount: FRAME_COUNT,
+            Width: width,
+            Height: height,
+            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            Flags: 0,
+            BufferUsage: winapi::shared::dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
             },
-            buffer_usage: winapi::shared::dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
-            buffer_count: FRAME_COUNT,
-            scaling: d3d12::dxgi::Scaling::Identity,
-            swap_effect: d3d12::dxgi::SwapEffect::FlipDiscard,
-            alpha_mode: d3d12::dxgi::AlphaMode::Unspecified,
-            flags: 0,
+            Scaling: winapi::shared::dxgitype::DXGI_MODE_SCALING_CENTERED,
+            Stereo: winapi::shared::ntdef::FALSE,
+            SwapEffect: winapi::shared::dxgi::DXGI_SWAP_EFFECT_DISCARD,
         };
 
-        let swapchain = factory4.
+        let swap_chain1 = factory4.as_factory2().create_swapchain_for_hwnd(command_queue.clone(), wnd.hwnd.clone(), swapchain_desc);
+        let swap_chain3 = d3d12::error_if_failed(swap_chain1.cast::<winapi::um::dxgi1_4::IDXGISwapChain3>());
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?
         factory4.MakeWindowAssociation(wnd.hwnd, 1);
 
-        let frame_index = swapchain1.get_current_back_buffer_index();
+        let frame_index = swap_chain3.get_current_back_buffer_index();
 
         // create descriptor heap
         let descriptor_heap = device.create_descriptor_heap(FRAME_COUNT, d3d12::descriptor::HeapType::Rtv, d3d12::descriptor::HeapFlags::empty());
@@ -125,7 +126,7 @@ impl GpuState {
         // create render target and render target view for each frame
         let mut render_targets: Vec<d3d12::resource::Resource> = Vec::new();
         for ix in 0..FRAME_COUNT {
-            let resource = swapchain1.as_swapchain0().get_buffer().unwrap();
+            let resource = swap_chain3.get_buffer().unwrap();
             device.create_render_target_view(resource, &render_target_view_desc, cpu_descriptor);
             render_targets.push(resource);
         }

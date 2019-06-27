@@ -2,13 +2,13 @@
 name = "piet-dx12"
 version = "0.0.0"
 authors = ["Raph Levien <raph.levien@gmail.com>", "Brian Merchant <bhmerchant@gmail.com>"]
-description = "A Metal-based renderer for the piet 2D graphics abstraction."
+description = "A dx12-based renderer for the piet 2D graphics abstraction."
 license = "MIT/Apache-2.0"
 edition = "2018"
 keywords = ["graphics", "2d"]
 categories = ["rendering::graphics-api"]
 
 [dependencies]
-winapi = { version = "0.3.*", features = ["winuser", "libloaderapi", "shellscalingapi", "d3d12sdklayers"] }
-wio = "0.2.*"
-d3d12 = "0.1.*"
+winapi = { version = "0.3.7", features = ["winuser", "libloaderapi", "shellscalingapi", "d3d12sdklayers", "dxgi", "dxgi1_2", "dxgi1_3", "dxgi1_4", "d3d12", "d3d12sdklayers", "d3dcommon", "d3dcompiler", "dxgiformat", "synchapi", "winerror"] }
+wio = "0.2.2"
+bitflags = "1.1.0"
