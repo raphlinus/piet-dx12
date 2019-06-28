@@ -1,5 +1,5 @@
-extern crate wio;
 extern crate winapi;
+extern crate wio;
 
 use winapi::Interface;
 
@@ -66,8 +66,6 @@ pub struct Fence(pub wio::com::ComPtr<winapi::um::d3d12::ID3D12Fence>);
 pub struct PipelineState(pub wio::com::ComPtr<winapi::um::d3d12::ID3D12PipelineState>);
 
 #[derive(Clone)]
-pub struct Shader(winapi::um::d3d12::D3D12_SHADER_BYTECODE);
-#[derive(Clone)]
 pub struct CachedPSO(winapi::um::d3d12::D3D12_CACHED_PIPELINE_STATE);
 
 #[derive(Clone)]
@@ -76,7 +74,10 @@ pub struct Blob(pub wio::com::ComPtr<winapi::um::d3dcommon::ID3DBlob>);
 #[derive(Clone)]
 pub struct ErrorBlob(pub wio::com::ComPtr<winapi::um::d3dcommon::ID3DBlob>);
 
-pub fn error_if_failed<T>(result: D3DResult<T>) -> Result<T, winapi::shared::winerror::HRESULT> {
+#[derive(Copy, Clone)]
+pub struct ShaderByteCode(pub winapi::um::d3d12::D3D12_SHADER_BYTECODE);
+
+pub fn error_if_failed_else_value<T>(result: D3DResult<T>) -> Result<T, winapi::shared::winerror::HRESULT> {
     let (result_value, hresult) = result;
 
     if winapi::shared::winerror::SUCCEEDED(hresult) {
@@ -86,8 +87,15 @@ pub fn error_if_failed<T>(result: D3DResult<T>) -> Result<T, winapi::shared::win
     }
 }
 
-impl Resource {
+pub fn error_if_failed_else_unit(hresult: winapi::shared::winerror::HRESULT) -> Result<(), winapi::shared::winerror::HRESULT> {
+    if winapi::shared::winerror::SUCCEEDED(hresult) {
+        Ok(())
+    } else {
+        Err(hresult)
+    }
 }
+
+impl Resource {}
 
 impl Factory2 {
     // TODO: interface not complete
@@ -112,7 +120,6 @@ impl Factory2 {
         (SwapChain1(wio::com::ComPtr::from_raw(swap_chain)), hr)
     }
 }
-
 
 impl Factory4 {
     pub unsafe fn create(flags: winapi::shared::minwindef::UINT) -> D3DResult<Self> {
@@ -149,8 +156,13 @@ impl CommandQueue {
 impl SwapChain {
     pub unsafe fn get_buffer(&self, id: u32) -> D3DResult<Resource> {
         let mut resource = std::ptr::null_mut();
-        let hr =
-            unsafe { self.0.GetBuffer(id, &winapi::um::d3d12::ID3D12Resource::uuidof(), resource as *mut *mut _) };
+        let hr = unsafe {
+            self.0.GetBuffer(
+                id,
+                &winapi::um::d3d12::ID3D12Resource::uuidof(),
+                resource as *mut *mut _,
+            )
+        };
 
         (Resource(wio::com::ComPtr::from_raw(resource)), hr)
     }
@@ -163,13 +175,22 @@ impl SwapChain {
 
 impl SwapChain1 {
     pub unsafe fn cast_into_swap_chain3(&self) -> SwapChain3 {
-        SwapChain3(self.0.cast::<winapi::shared::dxgi1_4::IDXGISwapChain3>().expect("could not cast into SwapChain3"))
+        SwapChain3(
+            self.0
+                .cast::<winapi::shared::dxgi1_4::IDXGISwapChain3>()
+                .expect("could not cast into SwapChain3"),
+        )
     }
 
     pub unsafe fn get_buffer(&self, id: u32) -> D3DResult<Resource> {
         let mut resource = std::ptr::null_mut();
-        let hr =
-            unsafe { self.0.GetBuffer(id, &winapi::um::d3d12::ID3D12Resource::uuidof(), resource as *mut *mut _) };
+        let hr = unsafe {
+            self.0.GetBuffer(
+                id,
+                &winapi::um::d3d12::ID3D12Resource::uuidof(),
+                resource as *mut *mut _,
+            )
+        };
 
         (Resource(wio::com::ComPtr::from_raw(resource)), hr)
     }
@@ -178,8 +199,13 @@ impl SwapChain1 {
 impl SwapChain3 {
     pub unsafe fn get_buffer(&self, id: u32) -> D3DResult<Resource> {
         let mut resource = std::ptr::null_mut();
-        let hr =
-            unsafe { self.0.GetBuffer(id, &winapi::um::d3d12::ID3D12Resource::uuidof(), resource as *mut *mut _) };
+        let hr = unsafe {
+            self.0.GetBuffer(
+                id,
+                &winapi::um::d3d12::ID3D12Resource::uuidof(),
+                resource as *mut *mut _,
+            )
+        };
 
         (Resource(wio::com::ComPtr::from_raw(resource)), hr)
     }
@@ -189,17 +215,16 @@ impl SwapChain3 {
     }
 }
 
-
 impl Device {
-    pub unsafe fn create_device(factory4: &Factory4) -> Result<Device, Vec<winapi::shared::winerror::HRESULT>> {
+    pub unsafe fn create_device(
+        factory4: &Factory4,
+    ) -> Result<Device, Vec<winapi::shared::winerror::HRESULT>> {
         let mut id = 0;
         let mut errors: Vec<winapi::shared::winerror::HRESULT> = Vec::new();
 
         loop {
-            let adapter: Adapter1 = match error_if_failed(factory4.enumerate_adapters(id)) {
-                Ok(a) => {
-                    a
-                },
+            let adapter: Adapter1 = match error_if_failed_else_value(factory4.enumerate_adapters(id)) {
+                Ok(a) => a,
                 Err(hr) => {
                     errors.push(hr);
                     return Err(errors);
@@ -208,11 +233,14 @@ impl Device {
 
             id += 1;
 
-            match error_if_failed(Device::create_using_adapter(adapter.0.clone(), winapi::um::d3dcommon::D3D_FEATURE_LEVEL_12_0)) {
+            match error_if_failed_else_value(Device::create_using_adapter(
+                adapter.0.clone(),
+                winapi::um::d3dcommon::D3D_FEATURE_LEVEL_12_0,
+            )) {
                 Ok(device) => {
                     std::mem::drop(adapter);
                     return Ok(device);
-                },
+                }
                 Err(hr) => {
                     errors.push(hr);
                     continue;
@@ -238,7 +266,10 @@ impl Device {
         (Device(wio::com::ComPtr::from_raw(device)), hr)
     }
 
-    pub unsafe fn create_command_allocator(&self, list_type: winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE) -> D3DResult<CommandAllocator> {
+    pub unsafe fn create_command_allocator(
+        &self,
+        list_type: winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE,
+    ) -> D3DResult<CommandAllocator> {
         let mut allocator = std::ptr::null_mut();
         let hr = unsafe {
             self.0.CreateCommandAllocator(
@@ -293,51 +324,45 @@ impl Device {
         (DescriptorHeap(wio::com::ComPtr::from_raw(heap)), hr)
     }
 
-    pub fn get_descriptor_increment_size(&self, heap_type: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE) -> u32 {
+    pub fn get_descriptor_increment_size(
+        &self,
+        heap_type: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE,
+    ) -> u32 {
         unsafe { self.0.GetDescriptorHandleIncrementSize(heap_type) }
     }
 
-    pub unsafe fn create_graphics_command_list(
+    pub unsafe fn create_command_list(
         &self,
         list_type: winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE,
         allocator: CommandAllocator,
         initial: PipelineState,
         node_mask: winapi::shared::minwindef::UINT,
-    ) -> D3DResult<GraphicsCommandList> {
+    ) -> D3DResult<CommandList> {
         let mut command_list = std::ptr::null_mut();
-        let hr =
-            self.0.CreateCommandList(
-                node_mask,
-                list_type,
-                allocator.0.as_raw(),
-                initial.0.as_raw(),
-                &winapi::um::d3d12::ID3D12GraphicsCommandList::uuidof(),
-                command_list as *mut *mut _,
-            );
+        let hr = self.0.CreateCommandList(
+            node_mask,
+            list_type,
+            allocator.0.as_raw(),
+            initial.0.as_raw(),
+            &winapi::um::d3d12::ID3D12CommandList::uuidof(),
+            command_list as *mut *mut _,
+        );
 
-        (GraphicsCommandList(wio::com::ComPtr::from_raw(command_list)), hr)
+        (
+            CommandList(wio::com::ComPtr::from_raw(command_list)),
+            hr,
+        )
     }
 
     pub unsafe fn create_compute_pipeline_state(
         &self,
-        root_signature: RootSignature,
-        cs: Shader,
-        node_mask: winapi::shared::minwindef::UINT,
-        cached_pso: CachedPSO,
-        flags: winapi::um::d3d12::D3D12_PIPELINE_STATE_FLAGS,
+        compute_pipeline_desc: &winapi::um::d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC
     ) -> D3DResult<PipelineState> {
         let mut pipeline = std::ptr::null_mut();
-        let desc = winapi::um::d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
-            pRootSignature: root_signature.0.as_raw(),
-            CS: cs.0,
-            NodeMask: node_mask,
-            CachedPSO: cached_pso.0,
-            Flags: flags,
-        };
 
         let hr = unsafe {
             self.0.CreateComputePipelineState(
-                &desc,
+                compute_pipeline_desc as *const _,
                 &winapi::um::d3d12::ID3D12PipelineState::uuidof(),
                 pipeline as *mut *mut _,
             )
@@ -348,8 +373,8 @@ impl Device {
 
     pub unsafe fn create_root_signature(
         &self,
-        blob: Blob,
         node_mask: winapi::shared::minwindef::UINT,
+        blob: Blob,
     ) -> D3DResult<RootSignature> {
         let mut signature = std::ptr::null_mut();
         let hr = unsafe {
@@ -399,31 +424,26 @@ impl Device {
         descriptor: CpuDescriptor,
     ) {
         unsafe {
-            self.0.CreateRenderTargetView(resource.0.as_raw(), desc, descriptor);
+            self.0
+                .CreateRenderTargetView(resource.0.as_raw(), desc, descriptor);
         }
     }
 
     // TODO: interface not complete
     pub unsafe fn create_fence(&self, initial: u64) -> D3DResult<Fence> {
         let mut fence = std::ptr::null_mut();
-        let hr = unsafe {
-            self.0.CreateFence(
+        let hr = self.0.CreateFence(
                 initial,
                 winapi::um::d3d12::D3D12_FENCE_FLAG_NONE,
                 &winapi::um::d3d12::ID3D12Fence::uuidof(),
                 fence as *mut *mut _,
-            )
-        };
+            );
 
         (Fence(wio::com::ComPtr::from_raw(fence)), hr)
     }
 }
 
-
-
-impl CommandAllocator {
-}
-
+impl CommandAllocator {}
 
 impl DescriptorHeap {
     pub fn start_cpu_descriptor(&self) -> CpuDescriptor {
@@ -433,18 +453,111 @@ impl DescriptorHeap {
 
 #[repr(transparent)]
 pub struct DescriptorRange(winapi::um::d3d12::D3D12_DESCRIPTOR_RANGE);
-impl DescriptorRange {
-
-}
-
-#[repr(transparent)]
-pub struct RootParameter(winapi::um::d3d12::D3D12_ROOT_PARAMETER);
-impl RootParameter {
-}
-
+impl DescriptorRange {}
 
 impl RootSignature {
+    pub unsafe fn serialize(
+        desc: &winapi::um::d3d12::D3D12_ROOT_SIGNATURE_DESC,
+        version: winapi::um::d3d12::D3D_ROOT_SIGNATURE_VERSION,
+    ) -> D3DResult<(Blob, ErrorBlob)> {
+        let mut blob = std::ptr::null_mut();
+        let mut error = std::ptr::null_mut();
+
+        let hr = unsafe {
+            winapi::um::d3d12::D3D12SerializeRootSignature(
+                desc as *const _,
+                version,
+                blob as *mut *mut _,
+                error as *mut *mut _,
+            )
+        };
+
+        ((Blob(wio::com::ComPtr::from_raw(blob)), ErrorBlob(wio::com::ComPtr::from_raw(error))), hr)
+    }
 }
 
+impl ShaderByteCode {
+    // `blob` may not be null.
+    pub unsafe fn from_blob(blob: Blob) -> Self {
+        ShaderByteCode(winapi::um::d3d12::D3D12_SHADER_BYTECODE {
+            BytecodeLength: blob.0.GetBufferSize(),
+            pShaderBytecode: blob.0.GetBufferPointer(),
+        })
+    }
 
+    /// Compile a shader from raw HLSL.
+    ///
+    /// * `target`: example format: `ps_5_1`.
+    pub unsafe fn compile(
+        code: &[u8],
+        target: String,
+        entry: String,
+        flags: winapi::shared::minwindef::DWORD,
+    ) -> D3DResult<(Blob, ErrorBlob)> {
+        let mut shader = std::ptr::null_mut();
+        let mut error = std::ptr::null_mut();
+
+        let target = std::ffi::CString::new(target).expect("could not convert target format string into ffi::CString");
+        let entry = std::ffi::CString::new(entry).expect("could not convert entry name String into ffi::CString");
+
+        let hr = unsafe {
+            winapi::um::d3dcompiler::D3DCompile(
+                code.as_ptr() as *const _,
+                code.len(),
+                std::ptr::null(), // defines
+                std::ptr::null(), // include
+                std::ptr::null_mut(),
+                entry.as_ptr() as *const _,
+                target.as_ptr() as *const _,
+                flags,
+                0,
+                shader as *mut *mut _,
+                error as *mut *mut _,
+            )
+        };
+
+        ((Blob(wio::com::ComPtr::from_raw(shader)), ErrorBlob(wio::com::ComPtr::from_raw(error))), hr)
+    }
+}
+
+impl CommandList {
+//    pub unsafe fn close(&self) -> winapi::shared::winerror::HRESULT {
+//        self.0.Close()
+//    }
+//
+//    pub fn reset(&self, allocator: CommandAllocator, initial_pso: PipelineState) -> winapi::shared::winerror::HRESULT {
+//        self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw())
+//    }
+}
+
+impl Fence {
+    pub unsafe fn set_event_on_completion(&self, event: Event, value: u64) -> winapi::shared::winerror::HRESULT {
+        self.0.SetEventOnCompletion(value, event.0)
+    }
+
+    pub unsafe fn get_value(&self) -> u64 {
+        self.0.GetCompletedValue()
+    }
+
+    pub unsafe fn signal(&self, value: u64) -> winapi::shared::winerror::HRESULT {
+        self.0.Signal(value)
+    }
+}
+
+impl Event {
+    pub unsafe fn create(manual_reset: bool, initial_state: bool) -> Self {
+        Event(
+            winapi::um::synchapi::CreateEventA(
+                std::ptr::null_mut(),
+                manual_reset as _,
+                initial_state as _,
+                std::ptr::null(),
+            )
+        )
+    }
+
+    pub unsafe fn wait(&self, timeout_ms: u32) -> u32 {
+        winapi::um::synchapi::WaitForSingleObject(self.0, timeout_ms)
+    }
+}
 
