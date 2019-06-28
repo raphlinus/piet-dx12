@@ -1,6 +1,6 @@
 extern crate winapi;
 
-use crate::d3d12;
+use crate::dx12;
 use crate::window;
 use winapi::Interface;
 
@@ -8,21 +8,21 @@ const FRAME_COUNT: u32 = 2;
 
 struct GpuState {
     // pipeline stuff
-    swapchain: d3d12::SwapChain3,
-    device: d3d12::Device,
-    render_targets: Vec<d3d12::Resource>,
-    command_allocator: d3d12::CommandAllocator,
-    command_queue: d3d12::CommandQueue,
-    root_signature: d3d12::RootSignature,
-    rtv_heap: d3d12::DescriptorHeap,
-    pipeline_state: d3d12::PipelineState,
-    command_list: d3d12::CommandList,
+    swapchain: dx12::SwapChain3,
+    device: dx12::Device,
+    render_targets: Vec<dx12::Resource>,
+    command_allocator: dx12::CommandAllocator,
+    command_queue: dx12::CommandQueue,
+    root_signature: dx12::RootSignature,
+    rtv_heap: dx12::DescriptorHeap,
+    pipeline_state: dx12::PipelineState,
+    command_list: dx12::GraphicsCommandList,
     rtv_descriptor_size: u32,
 
     // synchronizers
     frame_index: usize,
-    fence_event: d3d12::Event,
-    fence: d3d12::Fence,
+    fence_event: dx12::Event,
+    fence: dx12::Fence,
     fence_value: u64,
 }
 
@@ -41,7 +41,7 @@ impl GpuState {
 
         let (root_signature, pipeline_state, command_list) = GpuState::create_pipeline_state(&device, shader_code, entry, command_allocator.clone());
 
-        let fence_event = d3d12::Event::create(false, false);
+        let fence_event = dx12::Event::create(false, false);
 
         GpuState {
             swapchain,
@@ -83,14 +83,14 @@ impl GpuState {
         height: u32,
         wnd: window::Window,
     ) -> (
-        d3d12::SwapChain3,
-        d3d12::Device,
-        Vec<d3d12::Resource>,
-        d3d12::CommandAllocator,
-        d3d12::CommandQueue,
-        d3d12::DescriptorHeap,
+        dx12::SwapChain3,
+        dx12::Device,
+        Vec<dx12::Resource>,
+        dx12::CommandAllocator,
+        dx12::CommandQueue,
+        dx12::DescriptorHeap,
         u32,
-        d3d12::Fence,
+        dx12::Fence,
     ) {
         #[cfg(debug_assertions)]
         // Enable debug layer
@@ -113,13 +113,13 @@ impl GpuState {
         }
 
         // create factory4
-        let mut factory4 = d3d12::error_if_failed_else_value(d3d12::Factory4::create(
+        let mut factory4 = dx12::error_if_failed_else_value(dx12::Factory4::create(
             winapi::shared::dxgi1_3::DXGI_CREATE_FACTORY_DEBUG,
         ))
         .expect("could not create factory4");
 
         // create device
-        let device = match d3d12::Device::create_device(&factory4) {
+        let device = match dx12::Device::create_device(&factory4) {
             Ok(device) => device,
             Err(hr) => {
                 if hr[0] == winapi::shared::winerror::DXGI_ERROR_NOT_FOUND {
@@ -131,7 +131,7 @@ impl GpuState {
         };
 
         let list_type = winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE;
-        let command_queue = d3d12::error_if_failed_else_value(device.create_command_queue(
+        let command_queue = dx12::error_if_failed_else_value(device.create_command_queue(
             list_type,
             0,
             winapi::um::d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE,
@@ -157,7 +157,7 @@ impl GpuState {
             SwapEffect: winapi::shared::dxgi::DXGI_SWAP_EFFECT_DISCARD,
         };
 
-        let swap_chain1 = d3d12::error_if_failed_else_value(factory4.as_factory2().create_swapchain_for_hwnd(
+        let swap_chain1 = dx12::error_if_failed_else_value(factory4.as_factory2().create_swapchain_for_hwnd(
             command_queue.clone(),
             wnd.hwnd.clone(),
             swapchain_desc,
@@ -177,7 +177,7 @@ impl GpuState {
             Flags: winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
             NodeMask: 0,
         };
-        let rtv_heap = d3d12::error_if_failed_else_value(device.create_descriptor_heap(&descriptor_heap_desc))
+        let rtv_heap = dx12::error_if_failed_else_value(device.create_descriptor_heap(&descriptor_heap_desc))
             .expect("could not create descriptor heap");
         let rtv_descriptor_size =
             device.get_descriptor_increment_size(winapi::um::d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -185,9 +185,9 @@ impl GpuState {
         // create frame resources
         let mut cpu_descriptor = rtv_heap.start_cpu_descriptor();
         // create render target and render target view for each frame
-        let mut render_targets: Vec<d3d12::Resource> = Vec::new();
+        let mut render_targets: Vec<dx12::Resource> = Vec::new();
         for ix in 0..FRAME_COUNT {
-            let resource = d3d12::error_if_failed_else_value(swap_chain3.get_buffer(ix))
+            let resource = dx12::error_if_failed_else_value(swap_chain3.get_buffer(ix))
                 .expect("could not create render target resource");
             device.create_render_target_view(resource.clone(), std::ptr::null(), cpu_descriptor);
             // TODO: is this correct?
@@ -195,10 +195,10 @@ impl GpuState {
             render_targets.push(resource.clone());
         }
 
-        let command_allocator = d3d12::error_if_failed_else_value(device.create_command_allocator(list_type))
+        let command_allocator = dx12::error_if_failed_else_value(device.create_command_allocator(list_type))
             .expect("could not create command allocator");
 
-        let fence = d3d12::error_if_failed_else_value(device.create_fence(0)).expect("could not create fence");
+        let fence = dx12::error_if_failed_else_value(device.create_fence(0)).expect("could not create fence");
 
         (
             swap_chain3,
@@ -212,7 +212,7 @@ impl GpuState {
         )
     }
 
-    unsafe fn create_pipeline_state(device: &d3d12::Device, shader_code: &[u8], entry: String, command_allocator: d3d12::CommandAllocator) -> (d3d12::RootSignature, d3d12::PipelineState, d3d12::CommandList) {
+    unsafe fn create_pipeline_state(device: &dx12::Device, shader_code: &[u8], entry: String, command_allocator: dx12::CommandAllocator) -> (dx12::RootSignature, dx12::PipelineState, dx12::GraphicsCommandList) {
         // create empty root signature
         let root_signature_desc = winapi::um::d3d12::D3D12_ROOT_SIGNATURE_DESC {
             NumParameters: 0,
@@ -221,8 +221,8 @@ impl GpuState {
             pStaticSamplers: std::ptr::null(),
             Flags: winapi::um::d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
         };
-        let (blob, error_blob) = d3d12::error_if_failed_else_value(d3d12::RootSignature::serialize(&root_signature_desc, winapi::um::d3d12::D3D_ROOT_SIGNATURE_VERSION_1)).expect("could not serialize root signature");
-        let root_signature = d3d12::error_if_failed_else_value(device.create_root_signature(0, blob)).expect("could not create root signature");
+        let (blob, error_blob) = dx12::error_if_failed_else_value(dx12::RootSignature::serialize(&root_signature_desc, winapi::um::d3d12::D3D_ROOT_SIGNATURE_VERSION_1)).expect("could not serialize root signature");
+        let root_signature = dx12::error_if_failed_else_value(device.create_root_signature(0, blob)).expect("could not create root signature");
 
         let mut flags: winapi::shared::minwindef::DWORD = 0;
 
@@ -232,8 +232,8 @@ impl GpuState {
         }
 
         // load shader
-        let (compute_shader_blob, compile_error_blob) = d3d12::error_if_failed_else_value(d3d12::ShaderByteCode::compile(shader_code, String::from("cs_5_0"), entry, flags)).expect("could not compile compute shader");
-        let compute_shader_bytecode = d3d12::ShaderByteCode::from_blob(compute_shader_blob);
+        let (compute_shader_blob, compile_error_blob) = dx12::error_if_failed_else_value(dx12::ShaderByteCode::compile(shader_code, String::from("cs_5_0"), entry, flags)).expect("could not compile compute shader");
+        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
 
         // create compute pipeline state
         let compute_ps_desc = winapi::um::d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
@@ -246,11 +246,11 @@ impl GpuState {
             },
             Flags: winapi::um::d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
         };
-        let compute_pipeline_state = d3d12::error_if_failed_else_value(device.create_compute_pipeline_state(&compute_ps_desc)).expect("could not create compute pipeline state");
+        let compute_pipeline_state = dx12::error_if_failed_else_value(device.create_compute_pipeline_state(&compute_ps_desc)).expect("could not create compute pipeline state");
 
         // create command list
-        let command_list = d3d12::error_if_failed_else_value(device.create_command_list(winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE, command_allocator.clone(), compute_pipeline_state.clone(), 0)).expect("could not create compute pipeline list");
-        //command_list.close();
+        let command_list = dx12::error_if_failed_else_value(device.create_graphics_command_list(winapi::um::d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE, command_allocator.clone(), compute_pipeline_state.clone(), 0)).expect("could not create compute pipeline list");
+        command_list.close();
 
         (root_signature, compute_pipeline_state, command_list)
     }

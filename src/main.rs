@@ -1,7 +1,8 @@
 // #![windows_subsystem = "windows"] (I think I want the console)
-pub mod d3d12;
+pub mod dx12;
 pub mod gpu;
 pub mod window;
+pub mod error;
 
 fn main() {
     unsafe {

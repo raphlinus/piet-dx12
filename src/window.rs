@@ -1,7 +1,9 @@
 extern crate winapi;
 
-use std::os::windows::ffi::OsStrExt;
-use winapi::um::{libloaderapi, winuser};
+use os::windows::ffi::OsStrExt;
+use std::{ptr, ffi, iter, os, vec::Vec};
+use winapi::um::{libloaderapi, winuser, shellscalingapi, wingdi};
+use winapi::shared::{windef, minwindef, ntdef};
 
 pub fn win32_string(value: &str) -> Vec<u16> {
     std::ffi::OsStr::new(value)
@@ -10,31 +12,31 @@ pub fn win32_string(value: &str) -> Vec<u16> {
         .collect()
 }
 
-const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: winapi::shared::windef::DPI_AWARENESS_CONTEXT =
+const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: windef::DPI_AWARENESS_CONTEXT =
     -4isize as _;
-type SetProcessDPIAware = unsafe extern "system" fn() -> winapi::shared::minwindef::BOOL;
+type SetProcessDPIAware = unsafe extern "system" fn() -> minwindef::BOOL;
 type SetProcessDpiAwareness = unsafe extern "system" fn(
-    value: winapi::um::shellscalingapi::PROCESS_DPI_AWARENESS,
-) -> winapi::shared::ntdef::HRESULT;
+    value: shellscalingapi::PROCESS_DPI_AWARENESS,
+) -> ntdef::HRESULT;
 type SetProcessDpiAwarenessContext = unsafe extern "system" fn(
-    value: winapi::shared::windef::DPI_AWARENESS_CONTEXT,
-) -> winapi::shared::minwindef::BOOL;
+    value: windef::DPI_AWARENESS_CONTEXT,
+) -> minwindef::BOOL;
 type GetDpiForWindow = unsafe extern "system" fn(
-    hwnd: winapi::shared::windef::HWND,
-) -> winapi::shared::minwindef::UINT;
+    hwnd: windef::HWND,
+) -> minwindef::UINT;
 type GetDpiForMonitor = unsafe extern "system" fn(
-    hmonitor: winapi::shared::windef::HMONITOR,
-    dpi_type: winapi::um::shellscalingapi::MONITOR_DPI_TYPE,
-    dpi_x: *mut winapi::shared::minwindef::UINT,
-    dpi_y: *mut winapi::shared::minwindef::UINT,
-) -> winapi::shared::ntdef::HRESULT;
+    hmonitor: windef::HMONITOR,
+    dpi_type: shellscalingapi::MONITOR_DPI_TYPE,
+    dpi_x: *mut minwindef::UINT,
+    dpi_y: *mut minwindef::UINT,
+) -> ntdef::HRESULT;
 type EnableNonClientDpiScaling = unsafe extern "system" fn(
-    hwnd: winapi::shared::windef::HWND,
-) -> winapi::shared::minwindef::BOOL;
+    hwnd: windef::HWND,
+) -> minwindef::BOOL;
 
 // Helper function to dynamically load function pointer.
 // `library` and `function` must be zero-terminated.
-fn get_function_impl(library: &str, function: &str) -> Option<*const std::os::raw::c_void> {
+fn get_function_impl(library: &str, function: &str) -> Option<*const os::raw::c_void> {
     // Library names we will use are ASCII so we can use the A version to avoid string conversion.
     let module =
         unsafe { libloaderapi::LoadLibraryA(library.as_ptr() as winapi::um::winnt::LPCSTR) };
@@ -91,19 +93,19 @@ impl DpiFunctions {
             {
                 // We are on Windows 10 Anniversary Update (1607) or later.
                 if set_process_dpi_awareness_context(
-                    winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-                ) == winapi::shared::minwindef::FALSE
+                    windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+                ) == minwindef::FALSE
                 {
                     // V2 only works with Windows 10 Creators Update (1703). Try using the older
                     // V1 if we can't set V2.
                     set_process_dpi_awareness_context(
-                        winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+                        windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
                     );
                 }
             } else if let Some(set_process_dpi_awareness) = self.set_process_dpi_awareness {
                 // We are on Windows 8.1 or later.
                 set_process_dpi_awareness(
-                    winapi::um::shellscalingapi::PROCESS_PER_MONITOR_DPI_AWARE,
+                    shellscalingapi::PROCESS_PER_MONITOR_DPI_AWARE,
                 );
             } else if let Some(set_process_dpi_aware) = self.set_process_dpi_aware {
                 // We are on Vista or later.
@@ -112,7 +114,7 @@ impl DpiFunctions {
         }
     }
 
-    pub fn enable_non_client_dpi_scaling(&self, hwnd: winapi::shared::windef::HWND) {
+    pub fn enable_non_client_dpi_scaling(&self, hwnd: windef::HWND) {
         unsafe {
             if let Some(enable_nonclient_dpi_scaling) = self.enable_nonclient_dpi_scaling {
                 enable_nonclient_dpi_scaling(hwnd);
@@ -137,7 +139,7 @@ impl DpiFunctions {
         None
     }*/
 
-    pub fn hwnd_dpi_factor(&self, hwnd: winapi::shared::windef::HWND) -> f32 {
+    pub fn hwnd_dpi_factor(&self, hwnd: windef::HWND) -> f32 {
         unsafe {
             let hdc = winuser::GetDC(hwnd);
             if hdc.is_null() {
@@ -152,7 +154,7 @@ impl DpiFunctions {
             } else if let Some(get_dpi_for_monitor) = self.get_dpi_for_monitor {
                 // We are on Windows 8.1 or later.
                 let monitor =
-                    winuser::MonitorFromWindow(hwnd, winapi::um::winuser::MONITOR_DEFAULTTONEAREST);
+                    winuser::MonitorFromWindow(hwnd, winuser::MONITOR_DEFAULTTONEAREST);
                 if monitor.is_null() {
                     BASE_DPI
                 } else {
@@ -160,7 +162,7 @@ impl DpiFunctions {
                     let mut dpi_y = 0;
                     if get_dpi_for_monitor(
                         monitor,
-                        winapi::um::shellscalingapi::MDT_EFFECTIVE_DPI,
+                        shellscalingapi::MDT_EFFECTIVE_DPI,
                         &mut dpi_x,
                         &mut dpi_y,
                     ) == winapi::shared::winerror::S_OK
@@ -172,10 +174,10 @@ impl DpiFunctions {
                 }
             } else {
                 // We are on Vista or later.
-                if winuser::IsProcessDPIAware() != winapi::shared::minwindef::FALSE {
+                if winuser::IsProcessDPIAware() != minwindef::FALSE {
                     // If the process is DPI aware, then scaling must be handled by the application using
                     // this DPI value.
-                    winapi::um::wingdi::GetDeviceCaps(hdc, winapi::um::wingdi::LOGPIXELSX) as u32
+                    wingdi::GetDeviceCaps(hdc, wingdi::LOGPIXELSX) as u32
                 } else {
                     // If the process is DPI unaware, then scaling is performed by the OS; we thus return
                     // 96 (scale factor 1.0) to prevent the window from being re-scaled by both the
@@ -189,7 +191,7 @@ impl DpiFunctions {
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
-pub struct Vec2 {
+pub struct Point2DF32 {
     x: f32,
     y: f32,
 }
@@ -199,17 +201,17 @@ pub struct WindowGeom {
     pub dpi_factor: f32,
     pub is_fullscreen: bool,
     pub is_topmost: bool,
-    pub position: Vec2,
-    pub inner_size: Vec2,
-    pub outer_size: Vec2,
+    pub position: Point2DF32,
+    pub inner_size: Point2DF32,
+    pub outer_size: Point2DF32,
 }
 
 pub struct Window {
-    name: std::vec::Vec<u16>,
-    title: std::vec::Vec<u16>,
-    class: winapi::um::winuser::WNDCLASSW,
-    hinstance: *mut winapi::shared::minwindef::HINSTANCE__,
-    pub hwnd: *mut winapi::shared::windef::HWND__,
+    name: Vec<u16>,
+    title: Vec<u16>,
+    class: winuser::WNDCLASSW,
+    hinstance: *mut minwindef::HINSTANCE__,
+    pub hwnd: *mut windef::HWND__,
     dpi_functions: DpiFunctions,
 }
 
@@ -227,8 +229,11 @@ impl Window {
             hCursor: std::ptr::null_mut(),
             hbrBackground: std::ptr::null_mut(),
             lpszMenuName: std::ptr::null(),
-            lpszClassName: std::ptr::null_mut(),
+            lpszClassName: name.as_ptr() as *const _,
         };
+
+        winuser::RegisterClassW(&class);
+        winuser::IsGUIThread(1);
 
         let hwnd = winuser::CreateWindowExW(
             0,
@@ -244,10 +249,9 @@ impl Window {
             hinstance,
             std::ptr::null_mut(),
         );
-
-        unsafe {
-            winuser::RegisterClassW(&class);
-            winuser::IsGUIThread(1);
+        
+        if hwnd.is_null() {
+            panic!("could not create hwnd");
         }
 
         Window {
@@ -282,25 +286,25 @@ impl Window {
         }
     }
 
-    pub fn get_position(&self) -> Vec2 {
+    pub fn get_position(&self) -> Point2DF32 {
         unsafe {
-            let mut rect = winapi::shared::windef::RECT {
+            let mut rect = windef::RECT {
                 left: 0,
                 top: 0,
                 bottom: 0,
                 right: 0,
             };
             winuser::GetWindowRect(self.hwnd, &mut rect);
-            Vec2 {
+            Point2DF32 {
                 x: rect.left as f32,
                 y: rect.top as f32,
             }
         }
     }
 
-    pub fn get_inner_size(&self) -> Vec2 {
+    pub fn get_inner_size(&self) -> Point2DF32 {
         unsafe {
-            let mut rect = winapi::shared::windef::RECT {
+            let mut rect = windef::RECT {
                 left: 0,
                 top: 0,
                 bottom: 0,
@@ -308,23 +312,23 @@ impl Window {
             };
             winuser::GetClientRect(self.hwnd, &mut rect);
             let dpi = self.get_dpi_factor();
-            Vec2 {
+            Point2DF32 {
                 x: (rect.right - rect.left) as f32 / dpi,
                 y: (rect.bottom - rect.top) as f32 / dpi,
             }
         }
     }
 
-    pub fn get_outer_size(&self) -> Vec2 {
+    pub fn get_outer_size(&self) -> Point2DF32 {
         unsafe {
-            let mut rect = winapi::shared::windef::RECT {
+            let mut rect = windef::RECT {
                 left: 0,
                 top: 0,
                 bottom: 0,
                 right: 0,
             };
             winuser::GetWindowRect(self.hwnd, &mut rect);
-            Vec2 {
+            Point2DF32 {
                 x: (rect.right - rect.left) as f32,
                 y: (rect.bottom - rect.top) as f32,
             }
