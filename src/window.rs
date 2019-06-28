@@ -1,9 +1,9 @@
 extern crate winapi;
 
 use os::windows::ffi::OsStrExt;
-use std::{ptr, ffi, iter, os, vec::Vec};
-use winapi::um::{libloaderapi, winuser, shellscalingapi, wingdi};
-use winapi::shared::{windef, minwindef, ntdef};
+use std::{ffi, iter, os, ptr, vec::Vec};
+use winapi::shared::{minwindef, ntdef, windef};
+use winapi::um::{libloaderapi, shellscalingapi, wingdi, winuser};
 
 pub fn win32_string(value: &str) -> Vec<u16> {
     std::ffi::OsStr::new(value)
@@ -12,27 +12,20 @@ pub fn win32_string(value: &str) -> Vec<u16> {
         .collect()
 }
 
-const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: windef::DPI_AWARENESS_CONTEXT =
-    -4isize as _;
+const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: windef::DPI_AWARENESS_CONTEXT = -4isize as _;
 type SetProcessDPIAware = unsafe extern "system" fn() -> minwindef::BOOL;
-type SetProcessDpiAwareness = unsafe extern "system" fn(
-    value: shellscalingapi::PROCESS_DPI_AWARENESS,
-) -> ntdef::HRESULT;
-type SetProcessDpiAwarenessContext = unsafe extern "system" fn(
-    value: windef::DPI_AWARENESS_CONTEXT,
-) -> minwindef::BOOL;
-type GetDpiForWindow = unsafe extern "system" fn(
-    hwnd: windef::HWND,
-) -> minwindef::UINT;
+type SetProcessDpiAwareness =
+    unsafe extern "system" fn(value: shellscalingapi::PROCESS_DPI_AWARENESS) -> ntdef::HRESULT;
+type SetProcessDpiAwarenessContext =
+    unsafe extern "system" fn(value: windef::DPI_AWARENESS_CONTEXT) -> minwindef::BOOL;
+type GetDpiForWindow = unsafe extern "system" fn(hwnd: windef::HWND) -> minwindef::UINT;
 type GetDpiForMonitor = unsafe extern "system" fn(
     hmonitor: windef::HMONITOR,
     dpi_type: shellscalingapi::MONITOR_DPI_TYPE,
     dpi_x: *mut minwindef::UINT,
     dpi_y: *mut minwindef::UINT,
 ) -> ntdef::HRESULT;
-type EnableNonClientDpiScaling = unsafe extern "system" fn(
-    hwnd: windef::HWND,
-) -> minwindef::BOOL;
+type EnableNonClientDpiScaling = unsafe extern "system" fn(hwnd: windef::HWND) -> minwindef::BOOL;
 
 // Helper function to dynamically load function pointer.
 // `library` and `function` must be zero-terminated.
@@ -104,9 +97,7 @@ impl DpiFunctions {
                 }
             } else if let Some(set_process_dpi_awareness) = self.set_process_dpi_awareness {
                 // We are on Windows 8.1 or later.
-                set_process_dpi_awareness(
-                    shellscalingapi::PROCESS_PER_MONITOR_DPI_AWARE,
-                );
+                set_process_dpi_awareness(shellscalingapi::PROCESS_PER_MONITOR_DPI_AWARE);
             } else if let Some(set_process_dpi_aware) = self.set_process_dpi_aware {
                 // We are on Vista or later.
                 set_process_dpi_aware();
@@ -153,8 +144,7 @@ impl DpiFunctions {
                 }
             } else if let Some(get_dpi_for_monitor) = self.get_dpi_for_monitor {
                 // We are on Windows 8.1 or later.
-                let monitor =
-                    winuser::MonitorFromWindow(hwnd, winuser::MONITOR_DEFAULTTONEAREST);
+                let monitor = winuser::MonitorFromWindow(hwnd, winuser::MONITOR_DEFAULTTONEAREST);
                 if monitor.is_null() {
                     BASE_DPI
                 } else {
@@ -249,7 +239,7 @@ impl Window {
             hinstance,
             std::ptr::null_mut(),
         );
-        
+
         if hwnd.is_null() {
             panic!("could not create hwnd");
         }

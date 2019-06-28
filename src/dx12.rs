@@ -1,11 +1,11 @@
 extern crate winapi;
 extern crate wio;
 
-use wio::com::ComPtr;
-use winapi::Interface;
+use std::{ffi, ptr};
+use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror};
 use winapi::um::{d3d12, d3dcommon, synchapi, winnt};
-use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, winerror, minwindef, windef};
-use std::{ptr, ffi};
+use winapi::Interface;
+use wio::com::ComPtr;
 
 // everything is ripped from d3d12-rs, but wio::com::ComPtr, and winapi are used more directly
 
@@ -212,20 +212,19 @@ impl SwapChain3 {
 }
 
 impl Device {
-    pub unsafe fn create_device(
-        factory4: &Factory4,
-    ) -> Result<Device, Vec<winerror::HRESULT>> {
+    pub unsafe fn create_device(factory4: &Factory4) -> Result<Device, Vec<winerror::HRESULT>> {
         let mut id = 0;
         let mut errors: Vec<winerror::HRESULT> = Vec::new();
 
         loop {
-            let adapter: Adapter1 = match error_if_failed_else_value(factory4.enumerate_adapters(id)) {
-                Ok(a) => a,
-                Err(hr) => {
-                    errors.push(hr);
-                    return Err(errors);
-                }
-            };
+            let adapter: Adapter1 =
+                match error_if_failed_else_value(factory4.enumerate_adapters(id)) {
+                    Ok(a) => a,
+                    Err(hr) => {
+                        errors.push(hr);
+                        return Err(errors);
+                    }
+                };
 
             id += 1;
 
@@ -329,7 +328,7 @@ impl Device {
 
     pub unsafe fn create_compute_pipeline_state(
         &self,
-        compute_pipeline_desc: &d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC
+        compute_pipeline_desc: &d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC,
     ) -> D3DResult<PipelineState> {
         let mut pipeline = ptr::null_mut();
 
@@ -400,13 +399,13 @@ impl Device {
         let mut command_list = ptr::null_mut();
 
         let hr = self.0.CreateCommandList(
-                node_mask,
-                list_type,
-                allocator.0.as_raw(),
-                initial_ps.0.as_raw(),
-                &d3d12::ID3D12GraphicsCommandList::uuidof(),
-                command_list as *mut *mut _,
-            );
+            node_mask,
+            list_type,
+            allocator.0.as_raw(),
+            initial_ps.0.as_raw(),
+            &d3d12::ID3D12GraphicsCommandList::uuidof(),
+            command_list as *mut *mut _,
+        );
 
         (GraphicsCommandList(ComPtr::from_raw(command_list)), hr)
     }
@@ -427,18 +426,20 @@ impl Device {
     pub unsafe fn create_fence(&self, initial: u64) -> D3DResult<Fence> {
         let mut fence = ptr::null_mut();
         let hr = self.0.CreateFence(
-                initial,
-                d3d12::D3D12_FENCE_FLAG_NONE,
-                &d3d12::ID3D12Fence::uuidof(),
-                fence as *mut *mut _,
-            );
+            initial,
+            d3d12::D3D12_FENCE_FLAG_NONE,
+            &d3d12::ID3D12Fence::uuidof(),
+            fence as *mut *mut _,
+        );
 
         (Fence(ComPtr::from_raw(fence)), hr)
     }
 }
 
 impl CommandAllocator {
-
+    pub unsafe fn reset(&self) {
+        self.0.Reset();
+    }
 }
 
 impl DescriptorHeap {
@@ -468,7 +469,13 @@ impl RootSignature {
             )
         };
 
-        ((Blob(ComPtr::from_raw(blob)), ErrorBlob(ComPtr::from_raw(error))), hr)
+        (
+            (
+                Blob(ComPtr::from_raw(blob)),
+                ErrorBlob(ComPtr::from_raw(error)),
+            ),
+            hr,
+        )
     }
 }
 
@@ -493,8 +500,10 @@ impl ShaderByteCode {
         let mut shader = ptr::null_mut();
         let mut error = ptr::null_mut();
 
-        let target = ffi::CString::new(target).expect("could not convert target format string into ffi::CString");
-        let entry = ffi::CString::new(entry).expect("could not convert entry name String into ffi::CString");
+        let target = ffi::CString::new(target)
+            .expect("could not convert target format string into ffi::CString");
+        let entry = ffi::CString::new(entry)
+            .expect("could not convert entry name String into ffi::CString");
 
         let hr = unsafe {
             winapi::um::d3dcompiler::D3DCompile(
@@ -512,7 +521,13 @@ impl ShaderByteCode {
             )
         };
 
-        ((Blob(ComPtr::from_raw(shader)), ErrorBlob(ComPtr::from_raw(error))), hr)
+        (
+            (
+                Blob(ComPtr::from_raw(shader)),
+                ErrorBlob(ComPtr::from_raw(error)),
+            ),
+            hr,
+        )
     }
 }
 
@@ -532,14 +547,12 @@ impl Fence {
 
 impl Event {
     pub unsafe fn create(manual_reset: bool, initial_state: bool) -> Self {
-        Event(
-            synchapi::CreateEventA(
-                ptr::null_mut(),
-                manual_reset as _,
-                initial_state as _,
-                ptr::null(),
-            )
-        )
+        Event(synchapi::CreateEventA(
+            ptr::null_mut(),
+            manual_reset as _,
+            initial_state as _,
+            ptr::null(),
+        ))
     }
 
     pub unsafe fn wait(&self, timeout_ms: u32) -> u32 {
@@ -556,9 +569,19 @@ impl GraphicsCommandList {
         self.0.Close()
     }
 
-    pub unsafe fn reset(&self, allocator: CommandAllocator, initial_pso: PipelineState) -> winerror::HRESULT {
+    pub unsafe fn reset(
+        &self,
+        allocator: CommandAllocator,
+        initial_pso: PipelineState,
+    ) -> winerror::HRESULT {
         self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw())
     }
+
+    pub unsafe fn set_compute_root_signature(&self, signature: RootSignature) {
+        self.0.SetComputeRootSignature(signature.0.as_raw());
+    }
+
+    pub unsafe fn set_resource_barrier(&self, num_barriers: u32, resource_barriers: *const d3d12::D3D12_RESOURCE_BARRIER) {
+        self.0.ResourceBarrier(num_barriers, resource_barriers);
+    }
 }
-
-
