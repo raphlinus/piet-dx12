@@ -90,7 +90,6 @@ pub fn error_if_failed_else_value<T>(result: D3DResult<T>) -> Result<T, winerror
         Err(hresult)
     }
 }
-
 impl Resource {}
 
 impl Factory2 {
@@ -434,6 +433,29 @@ impl Device {
 
         (Fence(ComPtr::from_raw(fence)), hr)
     }
+
+    pub unsafe fn create_committed_resource(
+        &self,
+        heap_properties:
+        &d3d12::D3D12_HEAP_PROPERTIES,
+        flags: d3d12::D3D12_HEAP_FLAGS,
+        resource_description: &d3d12::D3D12_RESOURCE_DESC,
+        initial_resource_state: d3d12::D3D12_RESOURCE_STATES,
+        optimized_clear_value: d3d12::D3D12_CLEAR_VALUE) -> D3DResult<Resource> {
+        let resource = ptr::null_mut();
+
+        let hr = self.0.CreateCommittedResource(
+            heap_properties as *const _,
+            flags,
+            resource_description as *const _,
+            initial_resource_state,
+            optimized_clear_value,
+            &d3d12::ID3D12Resource::uuidof(),
+            resource,
+        );
+
+        (Resource(ComPtr::from_raw(resource)), hr)
+    }
 }
 
 impl CommandAllocator {
@@ -445,6 +467,10 @@ impl CommandAllocator {
 impl DescriptorHeap {
     pub fn start_cpu_descriptor(&self) -> CpuDescriptor {
         unsafe { self.0.GetCPUDescriptorHandleForHeapStart() }
+    }
+
+    pub fn start_gpu_descriptor(&self) -> GpuDescriptor {
+        unsafe { self.GetGPUDescriptorHandleForHeapStart() }
     }
 }
 

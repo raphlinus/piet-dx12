@@ -9,17 +9,25 @@ use winapi::shared::{winerror, dxgitype, dxgi, dxgi1_2, minwindef};
 const FRAME_COUNT: u32 = 2;
 
 struct GpuState {
+    width: u32,
+    height: u32,
+
     // pipeline stuff
     swapchain: dx12::SwapChain3,
     device: dx12::Device,
     render_targets: Vec<dx12::Resource>,
+    compute_targets: Vec<dx12::Resource>,
     command_allocator: dx12::CommandAllocator,
     command_queue: dx12::CommandQueue,
-    root_signature: dx12::RootSignature,
-    rtv_heap: dx12::DescriptorHeap,
-    pipeline_state: dx12::PipelineState,
+    compute_root_signature: dx12::RootSignature,
+    graphics_root_signature: dx12::RootSignature,
+    render_target_view_heap: dx12::DescriptorHeap,
+    compute_target_view_heap: dx12::DescriptorHeap,
+    render_target_view_descriptor_size: u32,
+    compute_target_view_descriptor_size: u32,
+    graphics_pipeline_state: dx12::PipelineState,
+    compute_pipeline_state: dx12::PipelineState,
     command_list: dx12::GraphicsCommandList,
-    rtv_descriptor_size: u32,
 
     // synchronizers
     frame_index: usize,
@@ -41,29 +49,36 @@ impl GpuState {
             swapchain,
             device,
             render_targets,
+            compute_targets,
             command_allocator,
             command_queue,
-            rtv_heap,
-            rtv_descriptor_size,
+            render_target_view_heap,
+            compute_target_view_heap,
+            render_target_view_descriptor_size,
+            compute_target_view_descriptor_size,
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
 
-        let (root_signature, pipeline_state, command_list) =
+        let (compute_root_signature, compute_pipeline_state, command_list) =
             GpuState::create_pipeline_state(&device, shader_code, entry, command_allocator.clone());
 
         let fence_event = dx12::Event::create(false, false);
 
         GpuState {
+            width,
+            height,
             swapchain,
             device,
             render_targets,
             command_allocator,
             command_queue,
-            root_signature,
-            rtv_heap,
-            pipeline_state,
+            compute_root_signature,
+            render_target_view_heap,
+            compute_target_view_heap,
+            compute_pipeline_state,
             command_list,
-            rtv_descriptor_size,
+            render_target_view_descriptor_size,
+            compute_target_view_descriptor_size,
             frame_index: 0,
             fence_event,
             fence,
@@ -105,9 +120,12 @@ impl GpuState {
         dx12::SwapChain3,
         dx12::Device,
         Vec<dx12::Resource>,
+        Vec<dx12::Resource>,
         dx12::CommandAllocator,
         dx12::CommandQueue,
         dx12::DescriptorHeap,
+        dx12::DescriptorHeap,
+        u32,
         u32,
         dx12::Fence,
     ) {
@@ -158,6 +176,57 @@ impl GpuState {
         ))
         .expect("could not create command queue");
 
+        // create compute resource descriptions
+        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
+        let heap_usage_flags = d3d12::D3D12_HEAP_FLAG_NONE;
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            //TODO: what alignment should be chosen?
+            Alignment: 0,
+            Width: width as u64,
+            Height: height,
+            DepthOrArraySize: 1,
+            //TODO: what should MipLevels be?
+            MipLevels: 1,
+            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            //essentially we're letting the adapter decide the layout
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+        };
+        let clear_value = d3d12::D3D12_CLEAR_VALUE {
+            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            //transparent black?
+            u: d3d12::D3D12_CLEAR_VALUE_u([0, 0, 0, 0]),
+        };
+
+        // create compute descriptor heap
+        let compute_heap_type = d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        let ct_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: compute_heap_type,
+            NumDescriptors: FRAME_COUNT,
+            Flags: heap_usage_flags,
+            NodeMask: 0,
+        };
+        let ctv_heap =
+            dx12::error_if_failed_else_value(device.create_descriptor_heap(&descriptor_heap_desc))
+                .expect("could not create descriptor heap");
+        let ctv_descriptor_size =
+            device.get_descriptor_increment_size(compute_heap_type);
+
         // create swapchain
         let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
             AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_UNSPECIFIED,
@@ -190,8 +259,8 @@ impl GpuState {
 
         let frame_index = swap_chain3.get_current_back_buffer_index();
 
-        // create descriptor heap
-        let descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+        // create graphics descriptor heap
+        let rt_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
             NumDescriptors: FRAME_COUNT,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
@@ -205,15 +274,22 @@ impl GpuState {
 
         // create frame resources
         let mut cpu_descriptor = rtv_heap.start_cpu_descriptor();
+        //TODO: still don't understand CPU vs GPU descriptor...
+        let mut gpu_descriptor = ctv_heap.start_gpu_descriptor();
         // create render target and render target view for each frame
+        let mut compute_targets: Vec<dx12::Resource> = Vec::new();
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
+
         for ix in 0..FRAME_COUNT {
-            let resource = dx12::error_if_failed_else_value(swap_chain3.get_buffer(ix))
+            let compute_target_resource = dx12::error_if_failed_else_value(device.create_committed_resource(&heap_properties, heap_usage_flags, &resource_description, d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS, clear_value)).expect("could not create intermediate output target for compute pipeline");
+            let render_target_resource = dx12::error_if_failed_else_value(swap_chain3.get_buffer(ix))
                 .expect("could not create render target resource");
             device.create_render_target_view(resource.clone(), std::ptr::null(), cpu_descriptor);
             // TODO: is this correct?
             cpu_descriptor.ptr += rtv_descriptor_size as usize;
-            render_targets.push(resource.clone());
+            gpu_descriptor.ptr += ctv_descriptor_size as u64;
+            compute_targets.push(compute_target_resource.clone());
+            render_targets.push(render_target_resource.clone());
         }
 
         let command_allocator =
@@ -226,11 +302,14 @@ impl GpuState {
         (
             swap_chain3,
             device,
+            compute_targets,
             render_targets,
             command_allocator,
             command_queue,
             rtv_heap,
+            ctv_heap,
             rtv_descriptor_size,
+            ctv_descriptor_size,
             fence,
         )
     }
