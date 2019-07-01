@@ -1,7 +1,7 @@
 extern crate winapi;
 
 use os::windows::ffi::OsStrExt;
-use std::{ffi, iter, os, ptr, vec::Vec};
+use std::{os, vec::Vec};
 use winapi::shared::{minwindef, ntdef, windef};
 use winapi::um::{libloaderapi, shellscalingapi, wingdi, winuser};
 
@@ -326,7 +326,7 @@ impl Window {
     }
 
     pub fn get_dpi_factor(&self) -> f32 {
-        unsafe { (*self).dpi_functions.hwnd_dpi_factor(self.hwnd) }
+        (*self).dpi_functions.hwnd_dpi_factor(self.hwnd)
     }
 
     pub fn get_window_geom(&self) -> WindowGeom {
