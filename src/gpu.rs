@@ -9,7 +9,7 @@ use std::{mem, ptr};
 
 const FRAME_COUNT: u32 = 2;
 
-struct GpuState {
+pub struct GpuState {
     width: u32,
     height: u32,
 
@@ -40,10 +40,8 @@ struct GpuState {
 }
 
 impl GpuState {
-    unsafe fn new(
-        width: u32,
-        height: u32,
-        wnd: window::Window,
+    pub unsafe fn new(
+        wnd: &window::Window,
         compute_shader_code: &[u8],
         compute_entry: String,
         vertex_shader_code: &[u8],
@@ -51,6 +49,9 @@ impl GpuState {
         fragment_shader_code: &[u8],
         fragment_entry: String,
     ) -> GpuState {
+        let width = wnd.get_width();
+        let height = wnd.get_height();
+
         let viewport = d3d12::D3D12_VIEWPORT {
             TopLeftX: 0.0,
             TopLeftY: 0.0 as f32,
@@ -183,7 +184,7 @@ impl GpuState {
     unsafe fn create_pipeline_dependencies(
         width: u32,
         height: u32,
-        wnd: window::Window,
+        wnd: &window::Window,
     ) -> (
         dx12::SwapChain3,
         dx12::Device,
@@ -217,7 +218,7 @@ impl GpuState {
 
         // create factory4
         let factory4 = dx12::error_if_failed_else_value(dx12::Factory4::create(
-            winapi::shared::dxgi1_3::DXGI_CREATE_FACTORY_DEBUG,
+            0,
         ))
         .expect("could not create factory4");
 

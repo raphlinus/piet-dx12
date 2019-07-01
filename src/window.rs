@@ -325,6 +325,14 @@ impl Window {
         }
     }
 
+    pub unsafe fn get_width(&self) -> u32 {
+        self.get_inner_size().x as u32
+    }
+
+    pub unsafe fn get_height(&self) -> u32 {
+        self.get_inner_size().y as u32
+    }
+
     pub fn get_dpi_factor(&self) -> f32 {
         (*self).dpi_functions.hwnd_dpi_factor(self.hwnd)
     }

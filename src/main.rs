@@ -9,6 +9,7 @@ fn main() {
         println!("creating window...");
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));
+        let gpu_state = gpu::GpuState::new(&wnd, &[], String::from("main"), &[], String::from("main"), &[], String::from("main"));
 
         println!("beginning loop...");
         loop {

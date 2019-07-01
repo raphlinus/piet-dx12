@@ -133,11 +133,12 @@ impl Factory4 {
         let factory = ptr::null_mut();
         let hr =
             dxgi1_3::CreateDXGIFactory2(
-                flags,
+                0,
                 &dxgi1_4::IDXGIFactory4::uuidof(),
                 factory as *mut *mut _,
             );
 
+        error_if_failed_else_none(hr).expect("could not create factory4");
         (Factory4(ComPtr::from_raw(factory)), hr)
     }
 
