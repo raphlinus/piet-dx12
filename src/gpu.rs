@@ -354,11 +354,12 @@ impl GpuState {
             SwapEffect: dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD,
         };
 
-        let swap_chain1 = factory4.as_factory2().create_swapchain_for_hwnd(
+        let swap_chain1 = factory4.create_swapchain_for_hwnd(
             command_queue.clone(),
             wnd.hwnd.clone(),
             swapchain_desc,
         );
+
         let swap_chain3 = swap_chain1.cast_into_swap_chain3();
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?

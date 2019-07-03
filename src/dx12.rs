@@ -105,8 +105,30 @@ impl Resource {
     }
 }
 
-impl Factory2 {
-    // TODO: interface not complete
+impl Factory4 {
+    pub unsafe fn create(flags: minwindef::UINT) -> Factory4 {
+        let mut factory = ptr::null_mut();
+
+        error_if_failed_else_none(dxgi1_3::CreateDXGIFactory2(
+            0,
+            &dxgi1_4::IDXGIFactory4::uuidof(),
+            &mut factory as *mut _ as *mut _,
+        ))
+        .expect("could not create factory4");
+
+        Factory4(ComPtr::from_raw(factory))
+    }
+
+    pub unsafe fn enumerate_adapters(
+        &self,
+        id: u32,
+    ) -> (*mut dxgi::IDXGIAdapter1, winerror::HRESULT) {
+        let mut adapter = ptr::null_mut();
+        let hr = self.0.EnumAdapters1(id, &mut adapter as *mut _ as *mut _);
+
+        (adapter, hr)
+    }
+
     pub unsafe fn create_swapchain_for_hwnd(
         &self,
         command_queue: CommandQueue,
@@ -122,38 +144,9 @@ impl Factory2 {
             ptr::null_mut(),
             &mut swap_chain as *mut _ as *mut _,
         ))
-        .expect("could not creation swapchain for hwnd");
+            .expect("could not creation swapchain for hwnd");
 
         SwapChain1(ComPtr::from_raw(swap_chain))
-    }
-}
-
-impl Factory4 {
-    pub unsafe fn create(flags: minwindef::UINT) -> Factory4 {
-        let mut factory = ptr::null_mut();
-
-        error_if_failed_else_none(dxgi1_3::CreateDXGIFactory2(
-            0,
-            &dxgi1_4::IDXGIFactory4::uuidof(),
-            &mut factory as *mut _ as *mut _,
-        ))
-        .expect("could not create factory4");
-
-        Factory4(ComPtr::from_raw(factory))
-    }
-
-    pub unsafe fn as_factory2(&self) -> Factory2 {
-        Factory2(ComPtr::from_raw(self.0.as_raw() as *mut _))
-    }
-
-    pub unsafe fn enumerate_adapters(
-        &self,
-        id: u32,
-    ) -> (*mut dxgi::IDXGIAdapter1, winerror::HRESULT) {
-        let mut adapter = ptr::null_mut();
-        let hr = self.0.EnumAdapters1(id, &mut adapter as *mut _ as *mut _);
-
-        (adapter, hr)
     }
 }
 
