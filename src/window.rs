@@ -351,7 +351,7 @@ impl Window {
 
 pub unsafe fn quit(wnd: &mut Window) -> bool {
     println!("    creating uninitialized message...");
-    let mut message: winuser::MSG = std::mem::uninitialized();
+    let mut message: winuser::MSG = std::mem::zeroed();
 
     println!("    getting message...");
     if winuser::GetMessageW(&mut message as *mut winuser::MSG, wnd.hwnd, 0, 0) == 0 {

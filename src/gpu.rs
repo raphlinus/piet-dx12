@@ -2,10 +2,10 @@ extern crate winapi;
 
 use crate::dx12;
 use crate::window;
-use winapi::Interface;
-use winapi::um::d3d12;
-use winapi::shared::{winerror, dxgitype, dxgi, dxgi1_2, minwindef};
 use std::{mem, ptr};
+use winapi::shared::{dxgi, dxgi1_2, dxgitype, minwindef, winerror};
+use winapi::um::d3d12;
+use winapi::Interface;
 
 const FRAME_COUNT: u32 = 2;
 
@@ -82,8 +82,22 @@ impl GpuState {
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
 
-        let (compute_root_signature, graphics_root_signature, compute_pipeline_state, graphics_pipeline_state, command_list) =
-            GpuState::create_pipeline_state(&device, compute_shader_code, vertex_shader_code, fragment_shader_code, compute_entry, vertex_entry, fragment_entry, command_allocator.clone());
+        let (
+            compute_root_signature,
+            graphics_root_signature,
+            compute_pipeline_state,
+            graphics_pipeline_state,
+            command_list,
+        ) = GpuState::create_pipeline_state(
+            &device,
+            compute_shader_code,
+            vertex_shader_code,
+            fragment_shader_code,
+            compute_entry,
+            vertex_entry,
+            fragment_entry,
+            command_allocator.clone(),
+        );
 
         let fence_event = dx12::Event::create(false, false);
 
@@ -118,36 +132,72 @@ impl GpuState {
         self.command_allocator.reset();
 
         // compute pipeline call
-        self.command_list.reset(self.command_allocator.clone(), self.compute_pipeline_state.clone());
-        self.command_list.set_compute_root_signature(self.compute_root_signature.clone());
-        let transition_intermediate_to_unordered_access = dx12::create_transition_resource_barrier(self.compute_targets[self.frame_index].0.as_raw(), d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        self.command_list.set_resource_barrier(1, [transition_intermediate_to_unordered_access].as_ptr());
-        let ct_gpu_virtual_address= self.compute_targets[self.frame_index].get_gpu_virtual_address();
-        self.command_list.set_compute_root_unordered_access_view(0, ct_gpu_virtual_address);
+        self.command_list.reset(
+            self.command_allocator.clone(),
+            self.compute_pipeline_state.clone(),
+        );
+        self.command_list
+            .set_compute_root_signature(self.compute_root_signature.clone());
+        let transition_intermediate_to_unordered_access = dx12::create_transition_resource_barrier(
+            self.compute_targets[self.frame_index].0.as_raw(),
+            d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        );
+        self.command_list
+            .set_resource_barrier(1, [transition_intermediate_to_unordered_access].as_ptr());
+        let ct_gpu_virtual_address =
+            self.compute_targets[self.frame_index].get_gpu_virtual_address();
+        self.command_list
+            .set_compute_root_unordered_access_view(0, ct_gpu_virtual_address);
         self.command_list.dispatch(10, 10, 10);
 
         // graphics pipeline call
-        self.command_list.set_pipeline_state(self.graphics_pipeline_state.clone());
-        self.command_list.set_graphics_root_signature(self.graphics_root_signature.clone());
+        self.command_list
+            .set_pipeline_state(self.graphics_pipeline_state.clone());
+        self.command_list
+            .set_graphics_root_signature(self.graphics_root_signature.clone());
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
-        let transition_intermediate_to_pixel_shader_resource = dx12::create_transition_resource_barrier(self.compute_targets[self.frame_index].0.as_raw(), d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS, d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-        let transition_render_target_from_present = dx12::create_transition_resource_barrier(self.render_targets[self.frame_index].0.as_raw(), d3d12::D3D12_RESOURCE_STATE_PRESENT, d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET);
-        self.command_list.set_resource_barrier(2,  [transition_intermediate_to_pixel_shader_resource, transition_render_target_from_present].as_ptr());
-        self.command_list.set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
+        let transition_intermediate_to_pixel_shader_resource =
+            dx12::create_transition_resource_barrier(
+                self.compute_targets[self.frame_index].0.as_raw(),
+                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            );
+        let transition_render_target_from_present = dx12::create_transition_resource_barrier(
+            self.render_targets[self.frame_index].0.as_raw(),
+            d3d12::D3D12_RESOURCE_STATE_PRESENT,
+            d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
+        );
+        self.command_list.set_resource_barrier(
+            2,
+            [
+                transition_intermediate_to_pixel_shader_resource,
+                transition_render_target_from_present,
+            ]
+            .as_ptr(),
+        );
+        self.command_list
+            .set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
         let mut rt_descriptor = self.render_target_view_heap.start_cpu_descriptor();
         rt_descriptor.ptr += self.frame_index;
         self.command_list.set_render_target(rt_descriptor);
         self.command_list.draw(0, 0, 0, 0);
-        let transition_render_target_to_present = dx12::create_transition_resource_barrier(self.render_targets[self.frame_index].0.as_raw(), d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET, d3d12::D3D12_RESOURCE_STATE_PRESENT);
-        self.command_list.set_resource_barrier(1, [transition_render_target_to_present].as_ptr());
+        let transition_render_target_to_present = dx12::create_transition_resource_barrier(
+            self.render_targets[self.frame_index].0.as_raw(),
+            d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
+            d3d12::D3D12_RESOURCE_STATE_PRESENT,
+        );
+        self.command_list
+            .set_resource_barrier(1, [transition_render_target_to_present].as_ptr());
 
         self.command_list.close();
     }
 
     unsafe fn execute_command_list(&mut self) {
         let raw_command_list = self.command_list.as_raw_list();
-        self.command_queue.execute_command_lists(1, &[raw_command_list.0.as_raw()]);
+        self.command_queue
+            .execute_command_lists(1, &[raw_command_list.0.as_raw()]);
     }
 
     unsafe fn render(&mut self) {
@@ -162,11 +212,16 @@ impl GpuState {
     }
 
     unsafe fn wait_for_render_completion(&mut self) {
-        self.command_queue.signal(self.fence.clone(), self.fence_value);
+        self.command_queue
+            .signal(self.fence.clone(), self.fence_value);
         self.fence_value = !self.fence_value;
 
         if self.fence.get_value() != self.fence_value {
-            dx12::error_if_failed_else_none(self.fence.set_event_on_completion(self.fence_event.clone(), self.fence_value)).expect("error setting fence event on render completion");
+            dx12::error_if_failed_else_none(
+                self.fence
+                    .set_event_on_completion(self.fence_event.clone(), self.fence_value),
+            )
+            .expect("error setting fence event on render completion");
             //TODO: handle return value?
             self.fence_event.wait(std::u32::MAX);
         }
@@ -217,10 +272,7 @@ impl GpuState {
         }
 
         // create factory4
-        let factory4 = dx12::error_if_failed_else_value(dx12::Factory4::create(
-            0,
-        ))
-        .expect("could not create factory4");
+        let factory4 = dx12::Factory4::create(0);
 
         // create device
         let device = match dx12::Device::create_device(&factory4) {
@@ -234,14 +286,10 @@ impl GpuState {
             }
         };
 
+        //TODO: command list type okay?
         let list_type = d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE;
-        let command_queue = dx12::error_if_failed_else_value(device.create_command_queue(
-            list_type,
-            0,
-            d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE,
-            0,
-        ))
-        .expect("could not create command queue");
+        let command_queue =
+            device.create_command_queue(list_type, 0, d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE, 0);
 
         // create compute resource descriptions
         let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
@@ -285,37 +333,32 @@ impl GpuState {
             Flags: heap_usage_flags,
             NodeMask: 0,
         };
-        let ctv_heap =
-            dx12::error_if_failed_else_value(device.create_descriptor_heap(&ct_descriptor_heap_desc))
-                .expect("could not create descriptor heap");
-        let ctv_descriptor_size =
-            device.get_descriptor_increment_size(compute_heap_type);
+        let ctv_heap = device.create_descriptor_heap(&ct_descriptor_heap_desc);
+        let ctv_descriptor_size = device.get_descriptor_increment_size(compute_heap_type);
 
         // create swapchain
         let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
-            AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_UNSPECIFIED,
+            AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_IGNORE,
             BufferCount: FRAME_COUNT,
             Width: width,
             Height: height,
             Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
             Flags: 0,
-            BufferUsage: dxgitype::DXGI_USAGE_UNORDERED_ACCESS,
+            BufferUsage: dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
             },
-            Scaling: dxgitype::DXGI_MODE_SCALING_CENTERED,
-            Stereo: minwindef::FALSE,
-            SwapEffect: dxgi::DXGI_SWAP_EFFECT_DISCARD,
+            Scaling: dxgitype::DXGI_MODE_SCALING_STRETCHED,
+            Stereo: false as _,
+            SwapEffect: dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD,
         };
 
-        let swap_chain1 =
-            dx12::error_if_failed_else_value(factory4.as_factory2().create_swapchain_for_hwnd(
-                command_queue.clone(),
-                wnd.hwnd.clone(),
-                swapchain_desc,
-            ))
-            .expect("could not create swap chain 1");
+        let swap_chain1 = factory4.as_factory2().create_swapchain_for_hwnd(
+            command_queue.clone(),
+            wnd.hwnd.clone(),
+            swapchain_desc,
+        );
         let swap_chain3 = swap_chain1.cast_into_swap_chain3();
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?
@@ -328,9 +371,7 @@ impl GpuState {
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
             NodeMask: 0,
         };
-        let rtv_heap =
-            dx12::error_if_failed_else_value(device.create_descriptor_heap(&rt_descriptor_heap_desc))
-                .expect("could not create descriptor heap");
+        let rtv_heap = device.create_descriptor_heap(&rt_descriptor_heap_desc);
         let rtv_descriptor_size =
             device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
@@ -342,13 +383,23 @@ impl GpuState {
         let mut compute_targets: Vec<dx12::Resource> = Vec::new();
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
 
+        // just work on getting rasterization working
         for ix in 0..FRAME_COUNT {
-            let compute_target_resource = dx12::error_if_failed_else_value(device.create_committed_resource(&heap_properties, heap_usage_flags, &resource_description, d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS, &clear_value)).expect("could not create intermediate output target resource for compute pipeline");
-            let render_target_resource = dx12::error_if_failed_else_value(swap_chain3.get_buffer(ix))
-                .expect("could not create render target resource");
+            let compute_target_resource = device.create_committed_resource(
+                &heap_properties,
+                heap_usage_flags,
+                &resource_description,
+                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                &clear_value,
+            );
+            let render_target_resource = swap_chain3.get_buffer(ix);
 
             device.create_unordered_access_view(compute_target_resource.clone(), ct_cpu_descriptor);
-            device.create_render_target_view(render_target_resource.clone(), ptr::null(), rt_cpu_descriptor);
+            device.create_render_target_view(
+                render_target_resource.clone(),
+                ptr::null(),
+                rt_cpu_descriptor,
+            );
 
             // TODO: is this correct?
             ct_cpu_descriptor.ptr += ctv_descriptor_size as usize;
@@ -358,12 +409,9 @@ impl GpuState {
             render_targets.push(render_target_resource.clone());
         }
 
-        let command_allocator =
-            dx12::error_if_failed_else_value(device.create_command_allocator(list_type))
-                .expect("could not create command allocator");
+        let command_allocator = device.create_command_allocator(list_type);
 
-        let fence = dx12::error_if_failed_else_value(device.create_fence(0))
-            .expect("could not create fence");
+        let fence = device.create_fence(0);
 
         (
             swap_chain3,
@@ -419,24 +467,18 @@ impl GpuState {
         };
         // serialize root signature description and create compute root signature
         //TODO: use error blob?
-        let (blob, _) = dx12::error_if_failed_else_value(dx12::RootSignature::serialize(
+        let (blob, _) = dx12::RootSignature::serialize_description(
             &compute_root_signature_desc,
             d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
-        ))
-        .expect("could not serialize compute root signature");
-        let compute_root_signature =
-            dx12::error_if_failed_else_value(device.create_root_signature(0, blob))
-                .expect("could not create compute root signature");
+        );
+        let compute_root_signature = device.create_root_signature(0, blob);
         // serialize root signature description and create graphics root signature
         //TODO: use error blob?
-        let (blob, _) = dx12::error_if_failed_else_value(dx12::RootSignature::serialize(
+        let (blob, _) = dx12::RootSignature::serialize_description(
             &graphics_root_signature_desc,
             d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
-        ))
-            .expect("could not serialize graphics root signature");
-        let graphics_root_signature =
-            dx12::error_if_failed_else_value(device.create_root_signature(0, blob))
-                .expect("could not create graphics root signature");
+        );
+        let graphics_root_signature = device.create_root_signature(0, blob);
 
         let mut flags: minwindef::DWORD = 0;
 
@@ -448,25 +490,33 @@ impl GpuState {
 
         // load compute shader
         //TODO: use error blob?
-        let (compute_shader_blob, _) = dx12::error_if_failed_else_value(
-            dx12::ShaderByteCode::compile(compute_shader_code, String::from("cs_5_0"), compute_entry, flags),
-        )
-            .expect("could not compile compute shader");
+        let (compute_shader_blob, _) = dx12::ShaderByteCode::compile(
+            compute_shader_code,
+            String::from("cs_5_0"),
+            compute_entry,
+            flags,
+        );
         let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
 
         // load graphics shaders
         //TODO: use error blob?
-        let (graphics_vertex_shader_blob, _) = dx12::error_if_failed_else_value(
-            dx12::ShaderByteCode::compile(vertex_shader_code, String::from("cs_5_0"), vertex_entry, flags),
-        )
-            .expect("could not compile vertex shader");
-        let graphics_vertex_shader_bytecode = dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
+        let (graphics_vertex_shader_blob, _) = dx12::ShaderByteCode::compile(
+            vertex_shader_code,
+            String::from("cs_5_0"),
+            vertex_entry,
+            flags,
+        );
+        let graphics_vertex_shader_bytecode =
+            dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
         //TODO: use error blob?
-        let (graphics_fragment_shader_blob, _) = dx12::error_if_failed_else_value(
-            dx12::ShaderByteCode::compile(fragment_shader_code, String::from("cs_5_0"), fragment_entry, flags),
-        )
-            .expect("could not compile fragment shader");
-        let graphics_fragment_shader_bytecode = dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
+        let (graphics_fragment_shader_blob, _) = dx12::ShaderByteCode::compile(
+            fragment_shader_code,
+            String::from("cs_5_0"),
+            fragment_entry,
+            flags,
+        );
+        let graphics_fragment_shader_bytecode =
+            dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
 
         // create compute pipeline state
         let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
@@ -479,10 +529,7 @@ impl GpuState {
             },
             Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
         };
-        let compute_pipeline_state = dx12::error_if_failed_else_value(
-            device.create_compute_pipeline_state(&compute_ps_desc),
-        )
-        .expect("could not create compute pipeline state");
+        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
 
         // create graphics pipeline state
         let graphics_ps_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC {
@@ -524,20 +571,23 @@ impl GpuState {
                 StencilEnable: false as _,
                 StencilReadMask: 0,
                 StencilWriteMask: 0,
-                FrontFace: d3d12::D3D12_DEPTH_STENCILOP_DESC {
-                    ..mem::zeroed()
-                },
-                BackFace: d3d12::D3D12_DEPTH_STENCILOP_DESC{
-                    ..mem::zeroed()
-                },
+                FrontFace: d3d12::D3D12_DEPTH_STENCILOP_DESC { ..mem::zeroed() },
+                BackFace: d3d12::D3D12_DEPTH_STENCILOP_DESC { ..mem::zeroed() },
             },
-            InputLayout: d3d12::D3D12_INPUT_LAYOUT_DESC {
-                ..mem::zeroed()
-            },
+            InputLayout: d3d12::D3D12_INPUT_LAYOUT_DESC { ..mem::zeroed() },
             IBStripCutValue: 0,
             PrimitiveTopologyType: 0,
             NumRenderTargets: 1,
-            RTVFormats: [winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM, winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM],
+            RTVFormats: [
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            ],
             DSVFormat: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
                 Count: 1,
@@ -550,18 +600,23 @@ impl GpuState {
             },
             Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
         };
-        let graphics_pipeline_state = dx12::error_if_failed_else_value(device.create_graphics_pipeline_state(&graphics_ps_desc)).expect("could not create graphics pipeline state");
+        let graphics_pipeline_state = device.create_graphics_pipeline_state(&graphics_ps_desc);
 
         // create command list
-        let command_list = dx12::error_if_failed_else_value(device.create_graphics_command_list(
+        let command_list = device.create_graphics_command_list(
             d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE,
             command_allocator.clone(),
             compute_pipeline_state.clone(),
             0,
-        ))
-        .expect("could not create compute pipeline list");
+        );
         command_list.close();
 
-        (compute_root_signature, graphics_root_signature, compute_pipeline_state, graphics_pipeline_state, command_list)
+        (
+            compute_root_signature,
+            graphics_root_signature,
+            compute_pipeline_state,
+            graphics_pipeline_state,
+            command_list,
+        )
     }
 }

@@ -1,7 +1,7 @@
 extern crate winapi;
 extern crate wio;
 
-use std::{ffi, ptr, mem};
+use std::{ffi, mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror};
 use winapi::um::{d3d12, d3dcommon, synchapi, winnt};
 use winapi::Interface;
@@ -109,48 +109,51 @@ impl Factory2 {
     // TODO: interface not complete
     pub unsafe fn create_swapchain_for_hwnd(
         &self,
-        queue: CommandQueue,
+        command_queue: CommandQueue,
         hwnd: windef::HWND,
         desc: dxgi1_2::DXGI_SWAP_CHAIN_DESC1,
-    ) -> D3DResult<SwapChain1> {
-        let swap_chain = ptr::null_mut();
-        let hr =
-            self.0.CreateSwapChainForHwnd(
-                queue.0.as_raw() as *mut _,
-                hwnd,
-                &desc,
-                ptr::null(),
-                ptr::null_mut(),
-                swap_chain as *mut *mut _,
-            );
+    ) -> SwapChain1 {
+        let mut swap_chain = ptr::null_mut();
+        error_if_failed_else_none(self.0.CreateSwapChainForHwnd(
+            command_queue.0.as_raw() as *mut _,
+            hwnd,
+            &desc,
+            ptr::null(),
+            ptr::null_mut(),
+            &mut swap_chain as *mut _ as *mut _,
+        ))
+        .expect("could not creation swapchain for hwnd");
 
-        (SwapChain1(ComPtr::from_raw(swap_chain)), hr)
+        SwapChain1(ComPtr::from_raw(swap_chain))
     }
 }
 
 impl Factory4 {
-    pub unsafe fn create(flags: minwindef::UINT) -> D3DResult<Self> {
-        let factory = ptr::null_mut();
-        let hr =
-            dxgi1_3::CreateDXGIFactory2(
-                0,
-                &dxgi1_4::IDXGIFactory4::uuidof(),
-                factory as *mut *mut _,
-            );
+    pub unsafe fn create(flags: minwindef::UINT) -> Factory4 {
+        let mut factory = ptr::null_mut();
 
-        error_if_failed_else_none(hr).expect("could not create factory4");
-        (Factory4(ComPtr::from_raw(factory)), hr)
+        error_if_failed_else_none(dxgi1_3::CreateDXGIFactory2(
+            0,
+            &dxgi1_4::IDXGIFactory4::uuidof(),
+            &mut factory as *mut _ as *mut _,
+        ))
+        .expect("could not create factory4");
+
+        Factory4(ComPtr::from_raw(factory))
     }
 
     pub unsafe fn as_factory2(&self) -> Factory2 {
         Factory2(ComPtr::from_raw(self.0.as_raw() as *mut _))
     }
 
-    pub unsafe fn enumerate_adapters(&self, id: u32) -> D3DResult<Adapter1> {
-        let adapter = ptr::null_mut();
-        let hr = self.0.EnumAdapters1(id, adapter as *mut *mut _);
+    pub unsafe fn enumerate_adapters(
+        &self,
+        id: u32,
+    ) -> (*mut dxgi::IDXGIAdapter1, winerror::HRESULT) {
+        let mut adapter = ptr::null_mut();
+        let hr = self.0.EnumAdapters1(id, &mut adapter as *mut _ as *mut _);
 
-        (Adapter1(ComPtr::from_raw(adapter)), hr)
+        (adapter, hr)
     }
 }
 
@@ -159,27 +162,32 @@ impl CommandQueue {
         self.0.Signal(fence.0.as_raw(), value)
     }
 
-    pub unsafe fn execute_command_lists(&self, num_command_lists: u32, command_lists: &[*mut d3d12::ID3D12CommandList]) {
-        self.0.ExecuteCommandLists(num_command_lists, command_lists.as_ptr());
+    pub unsafe fn execute_command_lists(
+        &self,
+        num_command_lists: u32,
+        command_lists: &[*mut d3d12::ID3D12CommandList],
+    ) {
+        self.0
+            .ExecuteCommandLists(num_command_lists, command_lists.as_ptr());
     }
 }
 
 impl SwapChain {
-    pub unsafe fn get_buffer(&self, id: u32) -> D3DResult<Resource> {
-        let resource = ptr::null_mut();
-        let hr =
-            self.0.GetBuffer(
-                id,
-                &d3d12::ID3D12Resource::uuidof(),
-                resource as *mut *mut _,
-            );
+    pub unsafe fn get_buffer(&self, id: u32) -> Resource {
+        let mut resource = ptr::null_mut();
+        error_if_failed_else_none(self.0.GetBuffer(
+            id,
+            &d3d12::ID3D12Resource::uuidof(),
+            &mut resource as *mut _ as *mut _,
+        ))
+        .expect("SwapChain could not get buffer");
 
-        (Resource(ComPtr::from_raw(resource)), hr)
+        Resource(ComPtr::from_raw(resource))
     }
 
     // TODO: present flags
-    pub fn present(&self, interval: u32, flags: u32) -> winerror::HRESULT {
-        unsafe { self.0.Present(interval, flags) }
+    pub unsafe fn present(&self, interval: u32, flags: u32) -> winerror::HRESULT {
+        self.0.Present(interval, flags)
     }
 }
 
@@ -192,30 +200,30 @@ impl SwapChain1 {
         )
     }
 
-    pub unsafe fn get_buffer(&self, id: u32) -> D3DResult<Resource> {
-        let resource = ptr::null_mut();
-        let hr =
-            self.0.GetBuffer(
-                id,
-                &d3d12::ID3D12Resource::uuidof(),
-                resource as *mut *mut _,
-            );
+    pub unsafe fn get_buffer(&self, id: u32) -> Resource {
+        let mut resource = ptr::null_mut();
+        error_if_failed_else_none(self.0.GetBuffer(
+            id,
+            &d3d12::ID3D12Resource::uuidof(),
+            &mut resource as *mut _ as *mut _,
+        ))
+        .expect("SwapChain1 could not get buffer");
 
-        (Resource(ComPtr::from_raw(resource)), hr)
+        Resource(ComPtr::from_raw(resource))
     }
 }
 
 impl SwapChain3 {
-    pub unsafe fn get_buffer(&self, id: u32) -> D3DResult<Resource> {
-        let resource = ptr::null_mut();
-        let hr =
-            self.0.GetBuffer(
-                id,
-                &d3d12::ID3D12Resource::uuidof(),
-                resource as *mut *mut _,
-            );
+    pub unsafe fn get_buffer(&self, id: u32) -> Resource {
+        let mut resource = ptr::null_mut();
+        error_if_failed_else_none(self.0.GetBuffer(
+            id,
+            &d3d12::ID3D12Resource::uuidof(),
+            &mut resource as *mut _ as *mut _,
+        ))
+        .expect("SwapChain3 could not get buffer");
 
-        (Resource(ComPtr::from_raw(resource)), hr)
+        Resource(ComPtr::from_raw(resource))
     }
 
     pub unsafe fn get_current_back_buffer_index(&self) -> u32 {
@@ -233,29 +241,28 @@ impl Device {
         let mut errors: Vec<winerror::HRESULT> = Vec::new();
 
         loop {
-            let adapter: Adapter1 =
-                match error_if_failed_else_value(factory4.enumerate_adapters(id)) {
-                    Ok(a) => a,
-                    Err(hr) => {
-                        errors.push(hr);
-                        return Err(errors);
-                    }
-                };
+            let adapter = {
+                let (adapter, hr) = factory4.enumerate_adapters(id);
+
+                if !winerror::SUCCEEDED(hr) {
+                    errors.push(hr);
+                    return Err(errors);
+                }
+
+                ComPtr::from_raw(adapter)
+            };
 
             id += 1;
 
-            match error_if_failed_else_value(Device::create_using_adapter(
-                adapter.0.clone(),
-                d3dcommon::D3D_FEATURE_LEVEL_12_0,
-            )) {
-                Ok(device) => {
-                    std::mem::drop(adapter);
-                    return Ok(device);
-                }
-                Err(hr) => {
-                    errors.push(hr);
-                    continue;
-                }
+            let (device, hr) =
+                Device::create_using_adapter(adapter.clone(), d3dcommon::D3D_FEATURE_LEVEL_12_0);
+
+            if !winerror::SUCCEEDED(hr) {
+                errors.push(hr);
+                continue;
+            } else {
+                std::mem::drop(adapter);
+                return Ok(Device(ComPtr::from_raw(device)));
             }
         }
     }
@@ -263,32 +270,31 @@ impl Device {
     pub unsafe fn create_using_adapter<I: Interface>(
         adapter: ComPtr<I>,
         feature_level: d3dcommon::D3D_FEATURE_LEVEL,
-    ) -> D3DResult<Self> {
-        let device = ptr::null_mut();
-        let hr =
-            d3d12::D3D12CreateDevice(
-                adapter.as_raw() as *mut _,
-                feature_level as _,
-                &d3d12::ID3D12Device::uuidof(),
-                device as *mut *mut _,
-            );
+    ) -> (*mut d3d12::ID3D12Device, winerror::HRESULT) {
+        let mut device = ptr::null_mut();
+        let hr = d3d12::D3D12CreateDevice(
+            adapter.as_raw() as *mut _,
+            feature_level as _,
+            &d3d12::ID3D12Device::uuidof(),
+            &mut device as *mut _ as *mut _,
+        );
 
-        (Device(ComPtr::from_raw(device)), hr)
+        (device, hr)
     }
 
     pub unsafe fn create_command_allocator(
         &self,
         list_type: d3d12::D3D12_COMMAND_LIST_TYPE,
-    ) -> D3DResult<CommandAllocator> {
-        let allocator = ptr::null_mut();
-        let hr =
-            self.0.CreateCommandAllocator(
-                list_type,
-                &d3d12::ID3D12CommandAllocator::uuidof(),
-                allocator as *mut *mut _,
-            );
+    ) -> CommandAllocator {
+        let mut allocator = ptr::null_mut();
+        error_if_failed_else_none(self.0.CreateCommandAllocator(
+            list_type,
+            &d3d12::ID3D12CommandAllocator::uuidof(),
+            &mut allocator as *mut _ as *mut _,
+        ))
+        .expect("device could nto create command allocator");
 
-        (CommandAllocator(ComPtr::from_raw(allocator)), hr)
+        CommandAllocator(ComPtr::from_raw(allocator))
     }
 
     pub unsafe fn create_command_queue(
@@ -297,7 +303,7 @@ impl Device {
         priority: minwindef::INT,
         flags: d3d12::D3D12_COMMAND_QUEUE_FLAGS,
         node_mask: minwindef::UINT,
-    ) -> D3DResult<CommandQueue> {
+    ) -> CommandQueue {
         let desc = d3d12::D3D12_COMMAND_QUEUE_DESC {
             Type: list_type,
             Priority: priority,
@@ -305,82 +311,87 @@ impl Device {
             NodeMask: node_mask,
         };
 
-        let cmd_q = ptr::null_mut();
-        let hr =
-            self.0.CreateCommandQueue(
-                &desc,
-                &d3d12::ID3D12CommandQueue::uuidof(),
-                cmd_q as *mut *mut _,
-            );
+        let mut cmd_q = ptr::null_mut();
+        error_if_failed_else_none(self.0.CreateCommandQueue(
+            &desc,
+            &d3d12::ID3D12CommandQueue::uuidof(),
+            &mut cmd_q as *mut _ as *mut _,
+        ))
+        .expect("device could not create command queue");
 
-        (CommandQueue(ComPtr::from_raw(cmd_q)), hr)
+        CommandQueue(ComPtr::from_raw(cmd_q))
     }
 
     pub unsafe fn create_descriptor_heap(
         &self,
         heap_description: &d3d12::D3D12_DESCRIPTOR_HEAP_DESC,
-    ) -> D3DResult<DescriptorHeap> {
-        let heap = ptr::null_mut();
-        let hr =
-            self.0.CreateDescriptorHeap(
-                heap_description,
-                &d3d12::ID3D12DescriptorHeap::uuidof(),
-                heap as *mut *mut _,
-            );
+    ) -> DescriptorHeap {
+        let mut heap = ptr::null_mut();
+        error_if_failed_else_none(self.0.CreateDescriptorHeap(
+            heap_description,
+            &d3d12::ID3D12DescriptorHeap::uuidof(),
+            &mut heap as *mut _ as *mut _,
+        ))
+        .expect("device could not create descriptor heap");
 
-        (DescriptorHeap(ComPtr::from_raw(heap)), hr)
+        DescriptorHeap(ComPtr::from_raw(heap))
     }
 
-    pub fn get_descriptor_increment_size(
+    pub unsafe fn get_descriptor_increment_size(
         &self,
         heap_type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE,
     ) -> u32 {
-        unsafe { self.0.GetDescriptorHandleIncrementSize(heap_type) }
+        self.0.GetDescriptorHandleIncrementSize(heap_type)
     }
 
     pub unsafe fn create_graphics_pipeline_state(
         &self,
         graphics_pipeline_desc: &d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC,
-    ) -> D3DResult<PipelineState> {
-        let pipeline_state = ptr::null_mut();
+    ) -> PipelineState {
+        let mut pipeline_state = ptr::null_mut();
 
-        let hr = self.0.CreateGraphicsPipelineState(graphics_pipeline_desc as *const _, &d3d12::ID3D12PipelineState::uuidof(), pipeline_state as *mut *mut _);
+        error_if_failed_else_none(self.0.CreateGraphicsPipelineState(
+            graphics_pipeline_desc as *const _,
+            &d3d12::ID3D12PipelineState::uuidof(),
+            &mut pipeline_state as *mut _ as *mut _,
+        ))
+        .expect("device could not create graphics pipeline state");
 
-        (PipelineState(ComPtr::from_raw(pipeline_state)), hr)
+        PipelineState(ComPtr::from_raw(pipeline_state))
     }
 
     pub unsafe fn create_compute_pipeline_state(
         &self,
         compute_pipeline_desc: &d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC,
-    ) -> D3DResult<PipelineState> {
-        let pipeline_state = ptr::null_mut();
+    ) -> PipelineState {
+        let mut pipeline_state = ptr::null_mut();
 
-        let hr =
-            self.0.CreateComputePipelineState(
-                compute_pipeline_desc as *const _,
-                &d3d12::ID3D12PipelineState::uuidof(),
-                pipeline_state as *mut *mut _,
-            );
+        error_if_failed_else_none(self.0.CreateComputePipelineState(
+            compute_pipeline_desc as *const _,
+            &d3d12::ID3D12PipelineState::uuidof(),
+            &mut pipeline_state as *mut _ as *mut _,
+        ))
+        .expect("device could not create compute pipeline state");
 
-        (PipelineState(ComPtr::from_raw(pipeline_state)), hr)
+        PipelineState(ComPtr::from_raw(pipeline_state))
     }
 
     pub unsafe fn create_root_signature(
         &self,
         node_mask: minwindef::UINT,
         blob: Blob,
-    ) -> D3DResult<RootSignature> {
-        let signature = ptr::null_mut();
-        let hr =
-            self.0.CreateRootSignature(
-                node_mask,
-                blob.0.GetBufferPointer(),
-                blob.0.GetBufferSize(),
-                &d3d12::ID3D12RootSignature::uuidof(),
-                signature as *mut *mut _,
-            );
+    ) -> RootSignature {
+        let mut signature = ptr::null_mut();
+        error_if_failed_else_none(self.0.CreateRootSignature(
+            node_mask,
+            blob.0.GetBufferPointer(),
+            blob.0.GetBufferSize(),
+            &d3d12::ID3D12RootSignature::uuidof(),
+            &mut signature as *mut _ as *mut _,
+        ))
+        .expect("device could not create root signature");
 
-        (RootSignature(ComPtr::from_raw(signature)), hr)
+        RootSignature(ComPtr::from_raw(signature))
     }
 
     pub unsafe fn create_command_signature(
@@ -389,8 +400,8 @@ impl Device {
         arguments: &[d3d12::D3D12_INDIRECT_ARGUMENT_DESC],
         stride: u32,
         node_mask: minwindef::UINT,
-    ) -> D3DResult<CommandSignature> {
-        let signature = ptr::null_mut();
+    ) -> CommandSignature {
+        let mut signature = ptr::null_mut();
         let desc = d3d12::D3D12_COMMAND_SIGNATURE_DESC {
             ByteStride: stride,
             NumArgumentDescs: arguments.len() as _,
@@ -398,15 +409,15 @@ impl Device {
             NodeMask: node_mask,
         };
 
-        let hr =
-            self.0.CreateCommandSignature(
-                &desc,
-                root_signature.0.as_raw(),
-                &d3d12::ID3D12CommandSignature::uuidof(),
-                signature as *mut *mut _,
-            );
+        error_if_failed_else_none(self.0.CreateCommandSignature(
+            &desc,
+            root_signature.0.as_raw(),
+            &d3d12::ID3D12CommandSignature::uuidof(),
+            &mut signature as *mut _ as *mut _,
+        ))
+        .expect("device could not create command signature");
 
-        (CommandSignature(ComPtr::from_raw(signature)), hr)
+        CommandSignature(ComPtr::from_raw(signature))
     }
 
     pub unsafe fn create_graphics_command_list(
@@ -415,23 +426,33 @@ impl Device {
         allocator: CommandAllocator,
         initial_ps: PipelineState,
         node_mask: minwindef::UINT,
-    ) -> D3DResult<GraphicsCommandList> {
-        let command_list = ptr::null_mut();
+    ) -> GraphicsCommandList {
+        let mut command_list = ptr::null_mut();
 
-        let hr = self.0.CreateCommandList(
+        error_if_failed_else_none(self.0.CreateCommandList(
             node_mask,
             list_type,
             allocator.0.as_raw(),
             initial_ps.0.as_raw(),
             &d3d12::ID3D12GraphicsCommandList::uuidof(),
-            command_list as *mut *mut _,
-        );
+            &mut command_list as *mut _ as *mut _,
+        ))
+        .expect("device could not create graphics command list");
 
-        (GraphicsCommandList(ComPtr::from_raw(command_list)), hr)
+        GraphicsCommandList(ComPtr::from_raw(command_list))
     }
 
-    pub unsafe fn create_unordered_access_view(&self, resource: Resource, descriptor: CpuDescriptor) {
-        self.0.CreateUnorderedAccessView(resource.0.as_raw(), ptr::null_mut(), ptr::null(), descriptor)
+    pub unsafe fn create_unordered_access_view(
+        &self,
+        resource: Resource,
+        descriptor: CpuDescriptor,
+    ) {
+        self.0.CreateUnorderedAccessView(
+            resource.0.as_raw(),
+            ptr::null_mut(),
+            ptr::null(),
+            descriptor,
+        )
     }
 
     pub unsafe fn create_render_target_view(
@@ -445,39 +466,41 @@ impl Device {
     }
 
     // TODO: interface not complete
-    pub unsafe fn create_fence(&self, initial: u64) -> D3DResult<Fence> {
-        let fence = ptr::null_mut();
-        let hr = self.0.CreateFence(
+    pub unsafe fn create_fence(&self, initial: u64) -> Fence {
+        let mut fence = ptr::null_mut();
+        error_if_failed_else_none(self.0.CreateFence(
             initial,
             d3d12::D3D12_FENCE_FLAG_NONE,
             &d3d12::ID3D12Fence::uuidof(),
-            fence as *mut *mut _,
-        );
+            &mut fence as *mut _ as *mut _,
+        ))
+        .expect("device could not create fence");
 
-        (Fence(ComPtr::from_raw(fence)), hr)
+        Fence(ComPtr::from_raw(fence))
     }
 
     pub unsafe fn create_committed_resource(
         &self,
-        heap_properties:
-        &d3d12::D3D12_HEAP_PROPERTIES,
+        heap_properties: &d3d12::D3D12_HEAP_PROPERTIES,
         flags: d3d12::D3D12_HEAP_FLAGS,
         resource_description: &d3d12::D3D12_RESOURCE_DESC,
         initial_resource_state: d3d12::D3D12_RESOURCE_STATES,
-        optimized_clear_value: &d3d12::D3D12_CLEAR_VALUE) -> D3DResult<Resource> {
+        optimized_clear_value: &d3d12::D3D12_CLEAR_VALUE,
+    ) -> Resource {
         let resource = ptr::null_mut();
 
-        let hr = self.0.CreateCommittedResource(
+        error_if_failed_else_none(self.0.CreateCommittedResource(
             heap_properties as *const _,
             flags,
             resource_description as *const _,
             initial_resource_state,
             optimized_clear_value as *const _,
             &d3d12::ID3D12Resource::uuidof(),
-            resource as *mut *mut  _,
-        );
+            resource as *mut *mut _,
+        ))
+        .expect("device could not create committed resource");
 
-        (Resource(ComPtr::from_raw(resource)), hr)
+        Resource(ComPtr::from_raw(resource))
     }
 }
 
@@ -502,27 +525,24 @@ pub struct DescriptorRange(d3d12::D3D12_DESCRIPTOR_RANGE);
 impl DescriptorRange {}
 
 impl RootSignature {
-    pub unsafe fn serialize(
+    pub unsafe fn serialize_description(
         desc: &d3d12::D3D12_ROOT_SIGNATURE_DESC,
         version: d3d12::D3D_ROOT_SIGNATURE_VERSION,
-    ) -> D3DResult<(Blob, ErrorBlob)> {
-        let blob = ptr::null_mut();
-        let error = ptr::null_mut();
+    ) -> (Blob, ErrorBlob) {
+        let mut blob = ptr::null_mut();
+        let mut error = ptr::null_mut();
 
-        let hr =
-            d3d12::D3D12SerializeRootSignature(
-                desc as *const _,
-                version,
-                blob as *mut *mut _,
-                error as *mut *mut _,
-            );
+        error_if_failed_else_none(d3d12::D3D12SerializeRootSignature(
+            desc as *const _,
+            version,
+            &mut blob as *mut _ as *mut _,
+            &mut error as *mut _ as *mut _,
+        ))
+        .expect("could not serialize root signature description");
 
         (
-            (
-                Blob(ComPtr::from_raw(blob)),
-                ErrorBlob(ComPtr::from_raw(error)),
-            ),
-            hr,
+            Blob(ComPtr::from_raw(blob)),
+            ErrorBlob(ComPtr::from_raw(error)),
         )
     }
 }
@@ -552,36 +572,33 @@ impl ShaderByteCode {
         target: String,
         entry: String,
         flags: minwindef::DWORD,
-    ) -> D3DResult<(Blob, ErrorBlob)> {
-        let shader = ptr::null_mut();
-        let error = ptr::null_mut();
+    ) -> (Blob, ErrorBlob) {
+        let mut shader = ptr::null_mut();
+        let mut error = ptr::null_mut();
 
         let target = ffi::CString::new(target)
             .expect("could not convert target format string into ffi::CString");
         let entry = ffi::CString::new(entry)
             .expect("could not convert entry name String into ffi::CString");
 
-        let hr =
-            winapi::um::d3dcompiler::D3DCompile(
-                code.as_ptr() as *const _,
-                code.len(),
-                ptr::null(), // defines
-                ptr::null(), // include
-                ptr::null_mut(),
-                entry.as_ptr() as *const _,
-                target.as_ptr() as *const _,
-                flags,
-                0,
-                shader as *mut *mut _,
-                error as *mut *mut _,
-            );
+        error_if_failed_else_none(winapi::um::d3dcompiler::D3DCompile(
+            code.as_ptr() as *const _,
+            code.len(),
+            ptr::null(), // defines
+            ptr::null(), // include
+            ptr::null_mut(),
+            entry.as_ptr() as *const _,
+            target.as_ptr() as *const _,
+            flags,
+            0,
+            &mut shader as *mut _ as *mut _,
+            &mut error as *mut _ as *mut _,
+        ))
+        .expect("could not compile shader code");
 
         (
-            (
-                Blob(ComPtr::from_raw(shader)),
-                ErrorBlob(ComPtr::from_raw(error)),
-            ),
-            hr,
+            Blob(ComPtr::from_raw(shader)),
+            ErrorBlob(ComPtr::from_raw(error)),
         )
     }
 }
@@ -640,7 +657,11 @@ impl GraphicsCommandList {
         self.0.SetGraphicsRootSignature(signature.0.as_raw());
     }
 
-    pub unsafe fn set_resource_barrier(&self, num_barriers: u32, resource_barriers: *const d3d12::D3D12_RESOURCE_BARRIER) {
+    pub unsafe fn set_resource_barrier(
+        &self,
+        num_barriers: u32,
+        resource_barriers: *const d3d12::D3D12_RESOURCE_BARRIER,
+    ) {
         self.0.ResourceBarrier(num_barriers, resource_barriers);
     }
 
@@ -663,23 +684,42 @@ impl GraphicsCommandList {
         start_vertex: u32,
         start_instance: u32,
     ) {
-        self.0.DrawInstanced(num_vertices, num_instances, start_vertex, start_instance);
+        self.0
+            .DrawInstanced(num_vertices, num_instances, start_vertex, start_instance);
     }
 
     pub unsafe fn set_pipeline_state(&self, pipeline_state: PipelineState) {
         self.0.SetPipelineState(pipeline_state.0.as_raw());
     }
 
-    pub unsafe fn set_compute_root_unordered_access_view(&self, root_parameter_index: u32, buffer_location: d3d12::D3D12_GPU_VIRTUAL_ADDRESS) {
-        self.0.SetComputeRootUnorderedAccessView(root_parameter_index, buffer_location);
+    pub unsafe fn set_compute_root_unordered_access_view(
+        &self,
+        root_parameter_index: u32,
+        buffer_location: d3d12::D3D12_GPU_VIRTUAL_ADDRESS,
+    ) {
+        self.0
+            .SetComputeRootUnorderedAccessView(root_parameter_index, buffer_location);
     }
 
-    pub unsafe fn set_graphics_root_shader_resource_view(&self, root_parameter_index: u32, buffer_location: d3d12::D3D12_GPU_VIRTUAL_ADDRESS) {
-        self.0.SetGraphicsRootShaderResourceView(root_parameter_index, buffer_location);
+    pub unsafe fn set_graphics_root_shader_resource_view(
+        &self,
+        root_parameter_index: u32,
+        buffer_location: d3d12::D3D12_GPU_VIRTUAL_ADDRESS,
+    ) {
+        self.0
+            .SetGraphicsRootShaderResourceView(root_parameter_index, buffer_location);
     }
 
-    pub unsafe fn set_render_target(&self, render_target_descriptor: d3d12::D3D12_CPU_DESCRIPTOR_HANDLE) {
-        self.0.OMSetRenderTargets(1, &render_target_descriptor as *const _, false as _, ptr::null());
+    pub unsafe fn set_render_target(
+        &self,
+        render_target_descriptor: d3d12::D3D12_CPU_DESCRIPTOR_HANDLE,
+    ) {
+        self.0.OMSetRenderTargets(
+            1,
+            &render_target_descriptor as *const _,
+            false as _,
+            ptr::null(),
+        );
     }
 }
 
@@ -701,7 +741,7 @@ pub fn default_render_target_blend_desc() -> d3d12::D3D12_RENDER_TARGET_BLEND_DE
 }
 
 pub fn do_nothing_blend_desc() -> d3d12::D3D12_BLEND_DESC {
-    d3d12::D3D12_BLEND_DESC{
+    d3d12::D3D12_BLEND_DESC {
         AlphaToCoverageEnable: minwindef::FALSE,
         IndependentBlendEnable: minwindef::FALSE,
         RenderTarget: [
@@ -717,7 +757,11 @@ pub fn do_nothing_blend_desc() -> d3d12::D3D12_BLEND_DESC {
     }
 }
 
-pub unsafe fn create_transition_resource_barrier(resource: *mut d3d12::ID3D12Resource, state_before: d3d12::D3D12_RESOURCE_STATES, state_after: d3d12::D3D12_RESOURCE_STATES) -> d3d12::D3D12_RESOURCE_BARRIER {
+pub unsafe fn create_transition_resource_barrier(
+    resource: *mut d3d12::ID3D12Resource,
+    state_before: d3d12::D3D12_RESOURCE_STATES,
+    state_after: d3d12::D3D12_RESOURCE_STATES,
+) -> d3d12::D3D12_RESOURCE_BARRIER {
     let transition = d3d12::D3D12_RESOURCE_TRANSITION_BARRIER {
         pResource: resource,
         Subresource: d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
