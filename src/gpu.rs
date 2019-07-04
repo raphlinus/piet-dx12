@@ -200,7 +200,8 @@ impl GpuState {
 //        self.command_list
 //            .set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
         let mut rt_descriptor = self.render_target_view_heap.start_cpu_descriptor();
-        rt_descriptor.ptr += self.frame_index;
+        let rt_descriptor_size = self.device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        rt_descriptor.ptr += self.frame_index*(rt_descriptor_size as usize);
         println!("      command list: set render target...");
         self.command_list.set_render_target(rt_descriptor);
 
@@ -226,9 +227,8 @@ impl GpuState {
 
     unsafe fn execute_command_list(&mut self) {
         println!("  executing command list...");
-        let raw_command_list = self.command_list.as_raw_list();
         self.command_queue
-            .execute_command_lists(1, &[raw_command_list.0.as_raw()]);
+            .execute_command_lists(1, &[self.command_list.as_raw_list()]);
     }
 
     pub unsafe fn render(&mut self) {

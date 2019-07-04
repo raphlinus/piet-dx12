@@ -57,8 +57,6 @@ pub struct RootSignature(pub ComPtr<d3d12::ID3D12RootSignature>);
 #[derive(Clone)]
 pub struct CommandSignature(pub ComPtr<d3d12::ID3D12CommandSignature>);
 #[derive(Clone)]
-pub struct CommandList(pub ComPtr<d3d12::ID3D12CommandList>);
-#[derive(Clone)]
 pub struct GraphicsCommandList(pub ComPtr<d3d12::ID3D12GraphicsCommandList>);
 
 #[derive(Clone)]
@@ -670,8 +668,8 @@ impl Event {
 }
 
 impl GraphicsCommandList {
-    pub unsafe fn as_raw_list(&self) -> CommandList {
-        CommandList(ComPtr::from_raw(self.0.as_raw() as *mut _))
+    pub unsafe fn as_raw_list(&self) -> *mut d3d12::ID3D12CommandList {
+        self.0.as_raw() as *mut d3d12::ID3D12CommandList
     }
 
     pub unsafe fn close(&self) -> winerror::HRESULT {
@@ -683,7 +681,6 @@ impl GraphicsCommandList {
         allocator: CommandAllocator,
         initial_pso: PipelineState,
     )  {
-        assert!(!allocator.0.is_null());
         error_if_failed_else_none(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw())).expect("could not reset command list");
     }
 
