@@ -127,6 +127,9 @@ float4 PSMain(PSInput input) : SV_TARGET
 }
 ".as_bytes();
 
+        let vertex_entry = String::from("VSMain");
+        let fragment_entry = String::from("PSMain");
+
 
         let (
             //compute_root_signature,
