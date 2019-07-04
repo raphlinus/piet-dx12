@@ -2,7 +2,7 @@ extern crate winapi;
 extern crate wio;
 
 use std::{ffi, mem, ptr};
-use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror};
+use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror, dxgiformat};
 use winapi::um::{d3d12, d3dcommon, synchapi, winnt, d3d12sdklayers, dxgidebug};
 use winapi::Interface;
 use wio::com::ComPtr;
@@ -75,7 +75,7 @@ pub struct CachedPSO(d3d12::D3D12_CACHED_PIPELINE_STATE);
 #[derive(Clone)]
 pub struct Blob(pub ComPtr<d3dcommon::ID3DBlob>);
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct ShaderByteCode {
     pub bytecode: d3d12::D3D12_SHADER_BYTECODE,
     blob: Option<Blob>,
@@ -774,20 +774,21 @@ pub fn default_render_target_blend_desc() -> d3d12::D3D12_RENDER_TARGET_BLEND_DE
     d3d12::D3D12_RENDER_TARGET_BLEND_DESC {
         BlendEnable: minwindef::FALSE,
         LogicOpEnable: minwindef::FALSE,
-        SrcBlend: 0,
-        DestBlend: 0,
+        SrcBlend: d3d12::D3D12_BLEND_ONE,
+        DestBlend: d3d12::D3D12_BLEND_ZERO,
         // enum variant 0
         BlendOp: d3d12::D3D12_BLEND_OP_ADD,
-        SrcBlendAlpha: 0,
-        DestBlendAlpha: 0,
+        SrcBlendAlpha: d3d12::D3D12_BLEND_ONE,
+        DestBlendAlpha: d3d12::D3D12_BLEND_ZERO,
         BlendOpAlpha: d3d12::D3D12_BLEND_OP_ADD,
         // enum variant 0
-        LogicOp: d3d12::D3D12_LOGIC_OP_CLEAR,
-        RenderTargetWriteMask: 0,
+        LogicOp: d3d12::D3D12_LOGIC_OP_NOOP,
+        RenderTargetWriteMask: d3d12::D3D12_COLOR_WRITE_ENABLE_ALL as u8,
     }
 }
 
-pub fn do_nothing_blend_desc() -> d3d12::D3D12_BLEND_DESC {
+pub fn default_blend_desc() -> d3d12::D3D12_BLEND_DESC {
+    // see default description here: https://docs.microsoft.com/en-us/windows/win32/direct3d12/cd3dx12-blend-desc
     d3d12::D3D12_BLEND_DESC {
         AlphaToCoverageEnable: minwindef::FALSE,
         IndependentBlendEnable: minwindef::FALSE,
@@ -847,3 +848,28 @@ pub unsafe fn enable_debug_layer() {
 
     (*debug_controller).Release();
 }
+
+pub struct InputElementDesc {
+    pub semantic_name: String,
+    pub semantic_index: u32,
+    pub format: dxgiformat::DXGI_FORMAT,
+    pub input_slot: u32,
+    pub aligned_byte_offset: u32,
+    pub input_slot_class: d3d12::D3D12_INPUT_CLASSIFICATION,
+    pub instance_data_step_rate: u32,
+}
+
+impl InputElementDesc {
+    pub fn as_winapi_struct(&self) -> d3d12::D3D12_INPUT_ELEMENT_DESC {
+        d3d12::D3D12_INPUT_ELEMENT_DESC {
+            SemanticName: self.semantic_name.as_ptr() as *const _,
+            SemanticIndex: self.semantic_index,
+            Format: self.format,
+            InputSlot: self.input_slot,
+            AlignedByteOffset: self.aligned_byte_offset,
+            InputSlotClass: self.input_slot_class,
+            InstanceDataStepRate: self.instance_data_step_rate,
+        }
+    }
+}
+

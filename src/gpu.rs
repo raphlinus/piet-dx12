@@ -3,14 +3,14 @@ extern crate winapi;
 use crate::dx12;
 use crate::window;
 use std::{mem, ptr};
-use winapi::shared::{dxgi, dxgi1_2, dxgitype, minwindef, winerror};
+use winapi::shared::{dxgi, dxgi1_2, dxgitype, minwindef, winerror, dxgiformat};
 use winapi::um::{d3d12, d3dcommon};
 use winapi::Interface;
 
 const FRAME_COUNT: u32 = 2;
 pub type TriangleVertexCoordinates = [f32; 3];
-pub type TriangleVertexIndices = [f32; 4];
-pub type TriangleVertex = (TriangleVertexCoordinates, TriangleVertexIndices);
+pub type TriangleVertexColor = [f32; 4];
+pub type TriangleVertex = (TriangleVertexCoordinates, TriangleVertexColor);
 const TRIANGLE_VERTICES: [TriangleVertex; 3] = [
     ([0.0, 0.25, 0.0], [1.0, 0.0, 0.0, 1.0]),
     ([0.25, -0.25, 0.0], [0.0, 1.0, 0.0, 1.0]),
@@ -476,7 +476,7 @@ impl GpuState {
             pParameters: ptr::null(),
             NumStaticSamplers: 0,
             pStaticSamplers: ptr::null(),
-            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
+            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
         };
         // serialize root signature description and create graphics root signature
         let blob= dx12::RootSignature::serialize_description(
@@ -588,6 +588,28 @@ impl GpuState {
 //        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
 
         // create graphics pipeline state
+        let position_ied = dx12::InputElementDesc {
+            semantic_name: String::from("POSITION"),
+            semantic_index: 0,
+            format: dxgiformat::DXGI_FORMAT_R32G32B32_FLOAT,
+            input_slot: 0,
+            aligned_byte_offset: 0,
+            input_slot_class: d3d12::D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            instance_data_step_rate: 0,
+        };
+
+        let color_ied = dx12::InputElementDesc {
+            semantic_name: String::from("POSITION"),
+            semantic_index: 0,
+            format: dxgiformat::DXGI_FORMAT_R32G32B32_FLOAT,
+            input_slot: 0,
+            aligned_byte_offset: 12,
+            input_slot_class: d3d12::D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            instance_data_step_rate: 0,
+        };
+
+        let ieds = [position_ied.as_winapi_struct(), color_ied.as_winapi_struct()];
+
         let graphics_ps_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC {
             pRootSignature: graphics_root_signature.0.as_raw(),
             VS: graphics_vertex_shader_bytecode.bytecode,
@@ -603,8 +625,8 @@ impl GpuState {
                 RasterizedStream: 0,
             },
             //TODO: confirm do nothing blend desc is correct
-            BlendState: dx12::do_nothing_blend_desc(),
-            SampleMask: 0,
+            BlendState: dx12::default_blend_desc(),
+            SampleMask: std::u32::MAX,
             // TODO: could ..mem::zeroed() work here?
             RasterizerState: d3d12::D3D12_RASTERIZER_DESC {
                 FillMode: d3d12::D3D12_FILL_MODE_SOLID,
@@ -630,9 +652,12 @@ impl GpuState {
                 FrontFace: d3d12::D3D12_DEPTH_STENCILOP_DESC { ..mem::zeroed() },
                 BackFace: d3d12::D3D12_DEPTH_STENCILOP_DESC { ..mem::zeroed() },
             },
-            InputLayout: d3d12::D3D12_INPUT_LAYOUT_DESC { ..mem::zeroed() },
+            InputLayout: d3d12::D3D12_INPUT_LAYOUT_DESC {
+                pInputElementDescs: ieds.as_ptr(),
+                NumElements: ieds.len() as u32,
+            },
             IBStripCutValue: 0,
-            PrimitiveTopologyType: 0,
+            PrimitiveTopologyType: d3d12::D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
             NumRenderTargets: 1,
             RTVFormats: [
                 winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
