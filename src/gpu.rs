@@ -142,6 +142,7 @@ impl GpuState {
 
     unsafe fn populate_command_list(&mut self) {
         println!("  populating command list...");
+        println!("      resetting command allocator...");
         self.command_allocator.reset();
 
         // compute pipeline call
@@ -167,10 +168,14 @@ impl GpuState {
         // graphics pipeline call
 //        self.command_list
 //            .set_pipeline_state(self.graphics_pipeline_state.clone());
+        println!("      resetting command list...");
         self.command_list.reset(self.command_allocator.clone(), self.graphics_pipeline_state.clone());
+        println!("      command list: set graphics root signature...");
         self.command_list
             .set_graphics_root_signature(self.graphics_root_signature.clone());
+        println!("      command list: set viewport...");
         self.command_list.set_viewport(&self.viewport);
+        println!("      command list: set scissor rect...");
         self.command_list.set_scissor_rect(&self.scissor_rect);
 //        let transition_intermediate_to_pixel_shader_resource =
 //            dx12::create_transition_resource_barrier(
@@ -183,6 +188,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
         );
+        println!("      command list: set pre-draw resource barrier...");
         self.command_list.set_resource_barrier(
             1,
             [
@@ -195,9 +201,11 @@ impl GpuState {
 //            .set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
         let mut rt_descriptor = self.render_target_view_heap.start_cpu_descriptor();
         rt_descriptor.ptr += self.frame_index;
+        println!("      command list: set render target...");
         self.command_list.set_render_target(rt_descriptor);
 
         // Record drawing commands.
+        println!("      command list: record draw commands...");
         self.command_list.clear_render_target_view(rt_descriptor, &CLEAR_COLOR);
         self.command_list.set_primitive_topology(d3dcommon::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         self.command_list.set_vertex_buffer(0, 1, &self.vertex_buffer_view);
@@ -208,9 +216,11 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
         );
+        println!("      command list: set post-draw resource barrier...");
         self.command_list
             .set_resource_barrier(1, [transition_render_target_to_present].as_ptr());
 
+        println!("      command list: close...");
         self.command_list.close();
     }
 
@@ -234,11 +244,11 @@ impl GpuState {
 
     unsafe fn wait_for_render_completion(&mut self) {
         println!("  waiting for render completion...");
+        
         println!("      signalling command queue...");
         self.command_queue
             .signal(self.fence.clone(), self.fence_value);
         // in the largeness of std::u64::MAX we trust
-        self.fence_value = (self.fence_value + 1);
 
         println!("      getting fence value...");
         if self.fence.get_value() < self.fence_value {
@@ -252,6 +262,8 @@ impl GpuState {
             println!("      waiting on fence event...");
             self.fence_event.wait(winapi::um::winbase::INFINITE);
         }
+
+        self.fence_value = (self.fence_value + 1);  
 
         println!("      updating frame index...");
         self.frame_index = self.swapchain.get_current_back_buffer_index() as usize;

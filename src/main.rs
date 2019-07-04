@@ -55,7 +55,7 @@ float4 PSMain(PSInput input) : SV_TARGET
             } else {
                 println!("rendering...");
                 gpu_state.render();
-                println!("    looping...");
+                println!("looping...");
             }
         }
     }

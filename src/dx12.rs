@@ -682,8 +682,9 @@ impl GraphicsCommandList {
         &self,
         allocator: CommandAllocator,
         initial_pso: PipelineState,
-    ) -> winerror::HRESULT {
-        self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw())
+    )  {
+        assert!(!allocator.0.is_null());
+        error_if_failed_else_none(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw())).expect("could not reset command list");
     }
 
     pub unsafe fn set_compute_root_signature(&self, signature: RootSignature) {
