@@ -53,6 +53,7 @@ float4 PSMain(PSInput input) : SV_TARGET
                 gpu_state.destroy();
                 break;
             } else {
+                println!("rendering...");
                 gpu_state.render();
                 println!("    looping...");
             }

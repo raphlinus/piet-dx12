@@ -233,8 +233,10 @@ impl SwapChain3 {
         self.0.GetCurrentBackBufferIndex()
     }
 
-    pub unsafe fn present(&self, interval: u32, flags: u32) -> winerror::HRESULT {
-        self.0.Present1(interval, flags, ptr::null())
+    pub unsafe fn present(&self, interval: u32, flags: u32) {
+        println!("  asking swapchain to present...");
+        error_if_failed_else_none(self.0.Present1(interval, flags, ptr::null())).expect("could not present to swapchain");
+        println!("  present successful.");
     }
 }
 
@@ -862,7 +864,7 @@ pub struct InputElementDesc {
 impl InputElementDesc {
     pub fn as_winapi_struct(&self) -> d3d12::D3D12_INPUT_ELEMENT_DESC {
         d3d12::D3D12_INPUT_ELEMENT_DESC {
-            SemanticName: self.semantic_name.as_ptr() as *const _,
+            SemanticName: std::ffi::CString::new(self.semantic_name.as_str()).unwrap().into_raw() as *const _,
             SemanticIndex: self.semantic_index,
             Format: self.format,
             InputSlot: self.input_slot,

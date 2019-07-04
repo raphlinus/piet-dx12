@@ -9,7 +9,7 @@ keywords = ["graphics", "2d"]
 categories = ["rendering::graphics-api"]
 
 [dependencies]
-winapi = { version = "0.3.7", features = ["winuser", "libloaderapi", "shellscalingapi", "d3d12sdklayers", "dxgi", "dxgi1_2", "dxgi1_3", "dxgi1_4", "d3d12", "d3d12sdklayers", "d3dcommon", "d3dcompiler", "dxgiformat", "synchapi", "winerror", "dxgidebug"] }
+winapi = { version = "0.3.7", features = ["winbase", "winuser", "libloaderapi", "shellscalingapi", "d3d12sdklayers", "dxgi", "dxgi1_2", "dxgi1_3", "dxgi1_4", "d3d12", "d3d12sdklayers", "d3dcommon", "d3dcompiler", "dxgiformat", "synchapi", "winerror", "dxgidebug"] }
 wio = "0.2.2"
 bitflags = "1.1.0"
 log = "0.4.6"

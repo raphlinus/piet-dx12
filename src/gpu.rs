@@ -141,6 +141,7 @@ impl GpuState {
     }
 
     unsafe fn populate_command_list(&mut self) {
+        println!("  populating command list...");
         self.command_allocator.reset();
 
         // compute pipeline call
@@ -183,7 +184,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
         );
         self.command_list.set_resource_barrier(
-            2,
+            1,
             [
                 //transition_intermediate_to_pixel_shader_resource,
                 transition_render_target_from_present,
@@ -214,6 +215,7 @@ impl GpuState {
     }
 
     unsafe fn execute_command_list(&mut self) {
+        println!("  executing command list...");
         let raw_command_list = self.command_list.as_raw_list();
         self.command_queue
             .execute_command_lists(1, &[raw_command_list.0.as_raw()]);
@@ -225,24 +227,26 @@ impl GpuState {
         self.execute_command_list();
 
         // TODO: what should the present flags be?
-        dx12::error_if_failed_else_none(self.swapchain.present(0, 0)).expect("presentation failed");
+        self.swapchain.present(1, 0);
 
         self.wait_for_render_completion();
     }
 
     unsafe fn wait_for_render_completion(&mut self) {
+        println!("  waiting for render completion...");
         self.command_queue
             .signal(self.fence.clone(), self.fence_value);
-        self.fence_value = !self.fence_value;
+        // in the largeness of std::u64::MAX we trust
+        self.fence_value = (self.fence_value + 1);
 
-        if self.fence.get_value() != self.fence_value {
+        if self.fence.get_value() < self.fence_value {
             dx12::error_if_failed_else_none(
                 self.fence
                     .set_event_on_completion(self.fence_event.clone(), self.fence_value),
             )
             .expect("error setting fence event on render completion");
             //TODO: handle return value?
-            self.fence_event.wait(std::u32::MAX);
+            self.fence_event.wait(winapi::um::winbase::INFINITE);
         }
 
         self.frame_index = self.swapchain.get_current_back_buffer_index() as usize;
@@ -599,7 +603,7 @@ impl GpuState {
         };
 
         let color_ied = dx12::InputElementDesc {
-            semantic_name: String::from("POSITION"),
+            semantic_name: String::from("COLOR"),
             semantic_index: 0,
             format: dxgiformat::DXGI_FORMAT_R32G32B32_FLOAT,
             input_slot: 0,
