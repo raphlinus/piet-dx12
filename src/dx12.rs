@@ -235,7 +235,7 @@ impl SwapChain3 {
 
     pub unsafe fn present(&self, interval: u32, flags: u32) {
         println!("  asking swapchain to present...");
-        error_if_failed_else_none(self.0.Present(interval, flags)).expect("could not present to swapchain");
+        error_if_failed_else_none(self.0.Present1(interval, flags, &dxgi1_2::DXGI_PRESENT_PARAMETERS{ ..mem::zeroed() } as *const _)).expect("could not present to swapchain");
         println!("  present successful.");
     }
 }
