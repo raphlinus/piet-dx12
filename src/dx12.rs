@@ -676,7 +676,7 @@ impl GraphicsCommandList {
         self.0.Dispatch(count_x, count_y, count_z);
     }
 
-    pub unsafe fn draw(
+    pub unsafe fn draw_instanced(
         &self,
         num_vertices: u32,
         num_instances: u32,
@@ -719,6 +719,18 @@ impl GraphicsCommandList {
             false as _,
             ptr::null(),
         );
+    }
+
+    pub unsafe fn clear_render_target_view(&self, render_target_descriptor: d3d12::D3D12_CPU_DESCRIPTOR_HANDLE, clear_color: &[f32; 4]) {
+        self.0.ClearRenderTargetView(render_target_descriptor, clear_color as *const _, 0, ptr::null());
+    }
+
+    pub unsafe fn set_primitive_topology(&self, primitive_topology: d3dcommon::D3D_PRIMITIVE_TOPOLOGY) {
+        self.0.IASetPrimitiveTopology(primitive_topology);
+    }
+
+    pub unsafe fn set_vertex_buffer(&self, start_slot: u32, num_views: u32, vertex_buffer_view: &d3d12::D3D12_VERTEX_BUFFER_VIEW) {
+        self.0.IASetVertexBuffers(start_slot, num_views, vertex_buffer_view as *const _);
     }
 }
 

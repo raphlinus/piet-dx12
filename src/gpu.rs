@@ -4,7 +4,7 @@ use crate::dx12;
 use crate::window;
 use std::{mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgitype, minwindef, winerror};
-use winapi::um::d3d12;
+use winapi::um::{d3d12, d3dcommon};
 use winapi::Interface;
 
 const FRAME_COUNT: u32 = 2;
@@ -16,6 +16,7 @@ const TRIANGLE_VERTICES: [TriangleVertex; 3] = [
     ([0.25, -0.25, 0.0], [0.0, 1.0, 0.0, 1.0]),
     ([-0.25, -0.25, 0.0], [0.0, 0.0, 1.0, 1.0]),
 ];
+const CLEAR_COLOR: [f32; 4] = [0.0, 0.2, 0.4, 1.0];
 
 pub struct GpuState {
     width: u32,
@@ -232,7 +233,13 @@ float4 PSMain(PSInput input) : SV_TARGET
         let mut rt_descriptor = self.render_target_view_heap.start_cpu_descriptor();
         rt_descriptor.ptr += self.frame_index;
         self.command_list.set_render_target(rt_descriptor);
-        self.command_list.draw(0, 0, 0, 0);
+
+        // Record drawing commands.
+        self.command_list.clear_render_target_view(rt_descriptor, &CLEAR_COLOR);
+        self.command_list.set_primitive_topology(d3dcommon::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        self.command_list.set_vertex_buffer(0, 1, &self.vertex_buffer_view);
+        self.command_list.draw_instanced(3, 1, 0, 0);
+
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
