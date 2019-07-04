@@ -76,7 +76,10 @@ pub struct CachedPSO(d3d12::D3D12_CACHED_PIPELINE_STATE);
 pub struct Blob(pub ComPtr<d3dcommon::ID3DBlob>);
 
 #[derive(Copy, Clone)]
-pub struct ShaderByteCode(pub d3d12::D3D12_SHADER_BYTECODE);
+pub struct ShaderByteCode {
+    pub bytecode: d3d12::D3D12_SHADER_BYTECODE,
+    blob: Option<Blob>,
+}
 
 pub struct DebugController(pub d3d12sdklayers::ID3D12Debug);
 
@@ -546,19 +549,25 @@ impl RootSignature {
 
 impl ShaderByteCode {
     // empty byte code
-    pub unsafe fn empty() -> Self {
-        ShaderByteCode(d3d12::D3D12_SHADER_BYTECODE {
-            BytecodeLength: 0,
-            pShaderBytecode: ptr::null(),
-        })
+    pub unsafe fn empty() -> ShaderByteCode {
+        ShaderByteCode {
+            bytecode: d3d12::D3D12_SHADER_BYTECODE {
+                BytecodeLength: 0,
+                pShaderBytecode: ptr::null(),
+            },
+            blob: None,
+        }
     }
 
     // `blob` may not be null.
-    pub unsafe fn from_blob(blob: Blob) -> Self {
-        ShaderByteCode(d3d12::D3D12_SHADER_BYTECODE {
-            BytecodeLength: blob.0.GetBufferSize(),
-            pShaderBytecode: blob.0.GetBufferPointer(),
-        })
+    pub unsafe fn from_blob(blob: Blob) -> ShaderByteCode {
+        ShaderByteCode {
+            bytecode: d3d12::D3D12_SHADER_BYTECODE {
+                BytecodeLength: blob.0.GetBufferSize(),
+                pShaderBytecode: blob.0.GetBufferPointer(),
+            },
+            blob: Some(blob),
+        }
     }
 
     /// Compile a shader from raw HLSL.
@@ -581,7 +590,7 @@ impl ShaderByteCode {
 
         error_if_failed_else_none(winapi::um::d3dcompiler::D3DCompile(
             code.as_ptr() as *const _,
-            mem::size_of_val(code),
+            code.len(),
             ptr::null(), // defines
             ptr::null(), // include
             ptr::null_mut(),

@@ -590,11 +590,11 @@ impl GpuState {
         // create graphics pipeline state
         let graphics_ps_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC {
             pRootSignature: graphics_root_signature.0.as_raw(),
-            VS: graphics_vertex_shader_bytecode.0,
-            PS: graphics_fragment_shader_bytecode.0,
-            DS: dx12::ShaderByteCode::empty().0,
-            HS: dx12::ShaderByteCode::empty().0,
-            GS: dx12::ShaderByteCode::empty().0,
+            VS: graphics_vertex_shader_bytecode.bytecode,
+            PS: graphics_fragment_shader_bytecode.bytecode,
+            DS: dx12::ShaderByteCode::empty().bytecode,
+            HS: dx12::ShaderByteCode::empty().bytecode,
+            GS: dx12::ShaderByteCode::empty().bytecode,
             StreamOutput: d3d12::D3D12_STREAM_OUTPUT_DESC {
                 pSODeclaration: ptr::null(),
                 NumEntries: 0,
