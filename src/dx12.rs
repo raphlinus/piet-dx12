@@ -3,7 +3,7 @@ extern crate wio;
 
 use std::{ffi, mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror};
-use winapi::um::{d3d12, d3dcommon, synchapi, winnt, d3d12sdklayers};
+use winapi::um::{d3d12, d3dcommon, synchapi, winnt, d3d12sdklayers, dxgidebug};
 use winapi::Interface;
 use wio::com::ComPtr;
 
@@ -75,9 +75,6 @@ pub struct CachedPSO(d3d12::D3D12_CACHED_PIPELINE_STATE);
 #[derive(Clone)]
 pub struct Blob(pub ComPtr<d3dcommon::ID3DBlob>);
 
-#[derive(Clone)]
-pub struct ErrorBlob(pub ComPtr<d3dcommon::ID3DBlob>);
-
 #[derive(Copy, Clone)]
 pub struct ShaderByteCode(pub d3d12::D3D12_SHADER_BYTECODE);
 
@@ -102,6 +99,14 @@ pub fn error_if_failed_else_none(hresult: winerror::HRESULT) -> Result<(), winer
 }
 
 impl Resource {
+    pub unsafe fn upload_data_to_resource<T>(&self, count: usize, data: *const T) {
+        let mut mapped_memory = ptr::null_mut();
+        let zero_range = d3d12::D3D12_RANGE {..mem::zeroed()};
+        error_if_failed_else_none(self.0.Map(0, &zero_range as *const _, &mut mapped_memory as *mut _ as *mut _)).expect("could not get pointer to mapped memory");
+        ptr::copy(data, mapped_memory, count);
+        self.0.Unmap(0, ptr::null());
+    }
+
     pub unsafe fn get_gpu_virtual_address(&self) -> d3d12::D3D12_GPU_VIRTUAL_ADDRESS {
         self.0.GetGPUVirtualAddress()
     }
@@ -591,6 +596,10 @@ impl ShaderByteCode {
 
         Blob(ComPtr::from_raw(shader))
     }
+
+    pub unsafe fn compile_from_file() -> Blob {
+        unimplemented!();
+    }
 }
 
 impl Fence {
@@ -768,12 +777,25 @@ pub unsafe fn create_transition_resource_barrier(
 }
 
 pub unsafe fn enable_debug_layer() {
-    let mut debug_controller: *mut d3d12sdklayers::ID3D12Debug = ptr::null_mut();
+    let mut debug_controller: *mut d3d12sdklayers::ID3D12Debug1 = ptr::null_mut();
     error_if_failed_else_none(d3d12::D3D12GetDebugInterface(
-        &d3d12sdklayers::ID3D12Debug::uuidof(),
+        &d3d12sdklayers::ID3D12Debug1::uuidof(),
         &mut debug_controller as *mut _ as *mut _,
     )).expect("could not create debug controller");
 
     (*debug_controller).EnableDebugLayer();
+
+//    let mut queue = ptr::null_mut();
+//    let hr =
+//        dxgi1_3::DXGIGetDebugInterface1(
+//            0,
+//            &dxgidebug::IDXGIInfoQueue::uuidof(),
+//            &mut queue as *mut _ as *mut _,
+//        );
+//
+//    if winerror::SUCCEEDED(hr) {
+//        (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
+//    }
+
     (*debug_controller).Release();
 }

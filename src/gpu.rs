@@ -8,6 +8,14 @@ use winapi::um::d3d12;
 use winapi::Interface;
 
 const FRAME_COUNT: u32 = 2;
+pub type TriangleVertexCoordinates = [f32; 3];
+pub type TriangleVertexIndices = [f32; 4];
+pub type TriangleVertex = (TriangleVertexCoordinates, TriangleVertexIndices);
+const TRIANGLE_VERTICES: [TriangleVertex; 3] = [
+    ([0.0, 0.25, 0.0], [1.0, 0.0, 0.0, 1.0]),
+    ([0.25, -0.25, 0.0], [0.0, 1.0, 0.0, 1.0]),
+    ([-0.25, -0.25, 0.0], [0.0, 0.0, 1.0, 1.0]),
+];
 
 pub struct GpuState {
     width: u32,
@@ -31,6 +39,8 @@ pub struct GpuState {
     graphics_pipeline_state: dx12::PipelineState,
     //compute_pipeline_state: dx12::PipelineState,
     command_list: dx12::GraphicsCommandList,
+    vertex_buffer: dx12::Resource,
+    vertex_buffer_view: d3d12::D3D12_VERTEX_BUFFER_VIEW,
 
     // synchronizers
     frame_index: usize,
@@ -85,12 +95,46 @@ impl GpuState {
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
 
+        let vertex_shader_code =
+"struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+PSInput VSMain(float4 position : POSITION, float4 color : COLOR)
+{
+    PSInput result;
+
+    result.position = position;
+    result.color = color;
+
+    return result;
+}
+".as_bytes();
+
+        let fragment_shader_code =
+"struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float4 PSMain(PSInput input) : SV_TARGET
+{
+    return input.color;
+}
+".as_bytes();
+
+
         let (
             //compute_root_signature,
             graphics_root_signature,
             //compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
+            vertex_buffer,
+            vertex_buffer_view,
         ) = GpuState::create_pipeline_state(
             &device,
             compute_shader_code,
@@ -128,6 +172,8 @@ impl GpuState {
             fence_event,
             fence,
             fence_value: 1,
+            vertex_buffer,
+            vertex_buffer_view,
         }
     }
 
@@ -429,6 +475,8 @@ impl GpuState {
         //dx12::PipelineState,
         dx12::PipelineState,
         dx12::GraphicsCommandList,
+        dx12::Resource,
+        d3d12::D3D12_VERTEX_BUFFER_VIEW,
     ) {
         // create empty root signature for compute
         // create 1 parameter root signature for graphics
@@ -471,6 +519,38 @@ impl GpuState {
         );
         let graphics_root_signature = device.create_root_signature(0, blob);
 
+        let vertex_buffer_stride = mem::size_of::<TriangleVertex>();
+        let vertex_buffer_size = vertex_buffer_stride*TRIANGLE_VERTICES.len();
+        let vertex_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let vertex_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: vertex_buffer_size as u64,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            ..mem::zeroed()
+        };
+        let vertex_buffer = device.create_committed_resource(&vertex_buffer_heap_properties, d3d12::D3D12_HEAP_FLAG_NONE, &vertex_buffer_resource_description, d3d12::D3D12_RESOURCE_STATE_GENERIC_READ, ptr::null());
+        vertex_buffer.upload_data_to_resource(vertex_buffer_size, TRIANGLE_VERTICES.as_ptr());
+        let vertex_buffer_view = d3d12::D3D12_VERTEX_BUFFER_VIEW {
+          BufferLocation: vertex_buffer.get_gpu_virtual_address(),
+          SizeInBytes: vertex_buffer_size as u32,
+          StrideInBytes: vertex_buffer_stride as u32,
+        };
+
         let mut flags: minwindef::DWORD = 0;
 
         #[cfg(debug_assertions)]
@@ -489,6 +569,7 @@ impl GpuState {
 //        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
 
         // load graphics shaders
+        println!("compiling vertex shader code...");
         let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile(
             vertex_shader_code,
             String::from("cs_5_0"),
@@ -497,6 +578,7 @@ impl GpuState {
         );
         let graphics_vertex_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
+        println!("compiling fragment shader code...");
         let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile(
             fragment_shader_code,
             String::from("cs_5_0"),
@@ -611,6 +693,8 @@ impl GpuState {
             //compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
+            vertex_buffer,
+            vertex_buffer_view,
         )
     }
 }
