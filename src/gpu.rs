@@ -53,11 +53,8 @@ pub struct GpuState {
 impl GpuState {
     pub unsafe fn new(
         wnd: &window::Window,
-        compute_shader_code: &[u8],
-        compute_entry: String,
-        vertex_shader_code: &[u8],
+        shader_code: &[u8],
         vertex_entry: String,
-        fragment_shader_code: &[u8],
         fragment_entry: String,
     ) -> GpuState {
         let width = wnd.get_width();
@@ -96,41 +93,6 @@ impl GpuState {
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
 
-        let vertex_shader_code =
-"struct PSInput
-{
-    float4 position : SV_POSITION;
-    float4 color : COLOR;
-};
-
-PSInput VSMain(float4 position : POSITION, float4 color : COLOR)
-{
-    PSInput result;
-
-    result.position = position;
-    result.color = color;
-
-    return result;
-}
-".as_bytes();
-
-        let fragment_shader_code =
-"struct PSInput
-{
-    float4 position : SV_POSITION;
-    float4 color : COLOR;
-};
-
-float4 PSMain(PSInput input) : SV_TARGET
-{
-    return input.color;
-}
-".as_bytes();
-
-        let vertex_entry = String::from("VSMain");
-        let fragment_entry = String::from("PSMain");
-
-
         let (
             //compute_root_signature,
             graphics_root_signature,
@@ -141,10 +103,7 @@ float4 PSMain(PSInput input) : SV_TARGET
             vertex_buffer_view,
         ) = GpuState::create_pipeline_state(
             &device,
-            compute_shader_code,
-            vertex_shader_code,
-            fragment_shader_code,
-            compute_entry,
+            shader_code,
             vertex_entry,
             fragment_entry,
             command_allocator.clone(),
@@ -260,7 +219,7 @@ float4 PSMain(PSInput input) : SV_TARGET
             .execute_command_lists(1, &[raw_command_list.0.as_raw()]);
     }
 
-    unsafe fn render(&mut self) {
+    pub unsafe fn render(&mut self) {
         self.populate_command_list();
 
         self.execute_command_list();
@@ -472,10 +431,7 @@ float4 PSMain(PSInput input) : SV_TARGET
 
     unsafe fn create_pipeline_state(
         device: &dx12::Device,
-        compute_shader_code: &[u8],
-        vertex_shader_code: &[u8],
-        fragment_shader_code: &[u8],
-        compute_entry: String,
+        shader_code: &[u8],
         vertex_entry: String,
         fragment_entry: String,
         command_allocator: dx12::CommandAllocator,
@@ -578,11 +534,11 @@ float4 PSMain(PSInput input) : SV_TARGET
 //        );
 //        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
 
-        // load graphics shaders
+        // load graphics shaders from byte string
         println!("compiling vertex shader code...");
         let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile(
-            vertex_shader_code,
-            String::from("cs_5_0"),
+            shader_code,
+            String::from("vs_5_0"),
             vertex_entry,
             flags,
         );
@@ -590,13 +546,33 @@ float4 PSMain(PSInput input) : SV_TARGET
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
         println!("compiling fragment shader code...");
         let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile(
-            fragment_shader_code,
-            String::from("cs_5_0"),
+            shader_code,
+            String::from("ps_5_0"),
             fragment_entry,
             flags,
         );
         let graphics_fragment_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
+
+        // load graphics shaders from file
+//        println!("compiling vertex shader code...");
+//        let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile_from_file(
+//            String::from("A:\\piet-dx12\\resources\\shaders.hlsl"),
+//            String::from("vs_5_0"),
+//            vertex_entry,
+//            flags,
+//        );
+//        let graphics_vertex_shader_bytecode =
+//            dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
+//        println!("compiling fragment shader code...");
+//        let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile_from_file(
+//            String::from("A:\\piet-dx12\\resources\\shaders.hlsl"),
+//            String::from("ps_5_0"),
+//            fragment_entry,
+//            flags,
+//        );
+//        let graphics_fragment_shader_bytecode =
+//            dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
 
         // create compute pipeline state
 //        let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
@@ -660,13 +636,13 @@ float4 PSMain(PSInput input) : SV_TARGET
             NumRenderTargets: 1,
             RTVFormats: [
                 winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-                winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+                winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
             ],
             DSVFormat: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {

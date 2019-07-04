@@ -581,7 +581,7 @@ impl ShaderByteCode {
 
         error_if_failed_else_none(winapi::um::d3dcompiler::D3DCompile(
             code.as_ptr() as *const _,
-            code.len(),
+            mem::size_of_val(code),
             ptr::null(), // defines
             ptr::null(), // include
             ptr::null_mut(),
@@ -597,8 +597,35 @@ impl ShaderByteCode {
         Blob(ComPtr::from_raw(shader))
     }
 
-    pub unsafe fn compile_from_file() -> Blob {
-        unimplemented!();
+    pub unsafe fn compile_from_file(
+        file_path: String,
+        target: String,
+        entry: String,
+        flags: minwindef::DWORD,
+    ) -> Blob {
+        let mut shader = ptr::null_mut();
+        //TODO: use error blob properly
+        let mut _error = ptr::null_mut();
+
+        let target = ffi::CString::new(target)
+            .expect("could not convert target format string into ffi::CString");
+        let entry = ffi::CString::new(entry)
+            .expect("could not convert entry name String into ffi::CString");
+
+        error_if_failed_else_none(winapi::um::d3dcompiler::D3DCompileFromFile(
+            file_path.as_ptr() as *const _,
+            ptr::null(),
+            ptr::null_mut(),
+            entry.as_ptr() as *const _,
+            target.as_ptr() as *const _,
+            flags,
+            0,
+            &mut shader as *mut _ as *mut _,
+            &mut _error as *mut _ as *mut _,
+        ))
+            .expect("could not compile shader code");
+
+        Blob(ComPtr::from_raw(shader))
     }
 }
 
