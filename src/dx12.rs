@@ -3,7 +3,7 @@ extern crate wio;
 
 use std::{ffi, mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror};
-use winapi::um::{d3d12, d3dcommon, synchapi, winnt};
+use winapi::um::{d3d12, d3dcommon, synchapi, winnt, d3d12sdklayers};
 use winapi::Interface;
 use wio::com::ComPtr;
 
@@ -81,6 +81,8 @@ pub struct ErrorBlob(pub ComPtr<d3dcommon::ID3DBlob>);
 #[derive(Copy, Clone)]
 pub struct ShaderByteCode(pub d3d12::D3D12_SHADER_BYTECODE);
 
+pub struct DebugController(pub d3d12sdklayers::ID3D12Debug);
+
 pub fn error_if_failed_else_value<T>(result: D3DResult<T>) -> Result<T, winerror::HRESULT> {
     let (result_value, hresult) = result;
 
@@ -134,7 +136,7 @@ impl Factory4 {
         command_queue: CommandQueue,
         hwnd: windef::HWND,
         desc: dxgi1_2::DXGI_SWAP_CHAIN_DESC1,
-    ) -> SwapChain1 {
+    ) -> SwapChain3 {
         let mut swap_chain = ptr::null_mut();
         error_if_failed_else_none(self.0.CreateSwapChainForHwnd(
             command_queue.0.as_raw() as *mut _,
@@ -146,7 +148,7 @@ impl Factory4 {
         ))
             .expect("could not creation swapchain for hwnd");
 
-        SwapChain1(ComPtr::from_raw(swap_chain))
+        SwapChain3(ComPtr::from_raw(swap_chain))
     }
 }
 
@@ -478,18 +480,18 @@ impl Device {
         flags: d3d12::D3D12_HEAP_FLAGS,
         resource_description: &d3d12::D3D12_RESOURCE_DESC,
         initial_resource_state: d3d12::D3D12_RESOURCE_STATES,
-        optimized_clear_value: &d3d12::D3D12_CLEAR_VALUE,
+        optimized_clear_value: *const d3d12::D3D12_CLEAR_VALUE,
     ) -> Resource {
-        let resource = ptr::null_mut();
+        let mut resource = ptr::null_mut();
 
         error_if_failed_else_none(self.0.CreateCommittedResource(
             heap_properties as *const _,
             flags,
             resource_description as *const _,
             initial_resource_state,
-            optimized_clear_value as *const _,
+            optimized_clear_value,
             &d3d12::ID3D12Resource::uuidof(),
-            resource as *mut *mut _,
+            &mut resource as *mut _ as *mut _,
         ))
         .expect("device could not create committed resource");
 
@@ -521,22 +523,19 @@ impl RootSignature {
     pub unsafe fn serialize_description(
         desc: &d3d12::D3D12_ROOT_SIGNATURE_DESC,
         version: d3d12::D3D_ROOT_SIGNATURE_VERSION,
-    ) -> (Blob, ErrorBlob) {
+    ) -> Blob {
         let mut blob = ptr::null_mut();
-        let mut error = ptr::null_mut();
+        //TODO: properly use error blob
+        let mut _error = ptr::null_mut();
 
         error_if_failed_else_none(d3d12::D3D12SerializeRootSignature(
             desc as *const _,
             version,
             &mut blob as *mut _ as *mut _,
-            &mut error as *mut _ as *mut _,
-        ))
-        .expect("could not serialize root signature description");
+            &mut _error as *mut _ as *mut _,
+        )).expect("could not serialize root signature description");
 
-        (
-            Blob(ComPtr::from_raw(blob)),
-            ErrorBlob(ComPtr::from_raw(error)),
-        )
+        Blob(ComPtr::from_raw(blob))
     }
 }
 
@@ -565,9 +564,10 @@ impl ShaderByteCode {
         target: String,
         entry: String,
         flags: minwindef::DWORD,
-    ) -> (Blob, ErrorBlob) {
+    ) -> Blob {
         let mut shader = ptr::null_mut();
-        let mut error = ptr::null_mut();
+        //TODO: use error blob properly
+        let mut _error = ptr::null_mut();
 
         let target = ffi::CString::new(target)
             .expect("could not convert target format string into ffi::CString");
@@ -585,14 +585,11 @@ impl ShaderByteCode {
             flags,
             0,
             &mut shader as *mut _ as *mut _,
-            &mut error as *mut _ as *mut _,
+            &mut _error as *mut _ as *mut _,
         ))
         .expect("could not compile shader code");
 
-        (
-            Blob(ComPtr::from_raw(shader)),
-            ErrorBlob(ComPtr::from_raw(error)),
-        )
+        Blob(ComPtr::from_raw(shader))
     }
 }
 
@@ -768,4 +765,15 @@ pub unsafe fn create_transition_resource_barrier(
     *resource_barrier.u.Transition_mut() = transition;
 
     resource_barrier
+}
+
+pub unsafe fn enable_debug_layer() {
+    let mut debug_controller: *mut d3d12sdklayers::ID3D12Debug = ptr::null_mut();
+    error_if_failed_else_none(d3d12::D3D12GetDebugInterface(
+        &d3d12sdklayers::ID3D12Debug::uuidof(),
+        &mut debug_controller as *mut _ as *mut _,
+    )).expect("could not create debug controller");
+
+    (*debug_controller).EnableDebugLayer();
+    (*debug_controller).Release();
 }

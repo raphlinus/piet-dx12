@@ -1,3 +1,7 @@
+#[macro_use]
+extern crate log;
+extern crate env_logger;
+
 // #![windows_subsystem = "windows"] (I think I want the console)
 pub mod dx12;
 pub mod error;
@@ -6,6 +10,8 @@ pub mod window;
 
 fn main() {
     unsafe {
+        env_logger::init();
+
         println!("creating window...");
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));

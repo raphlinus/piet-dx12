@@ -266,7 +266,7 @@ impl Window {
 
     pub fn get_is_maximized(&self) -> bool {
         unsafe {
-            let mut wp: winuser::WINDOWPLACEMENT = std::mem::uninitialized();
+            let mut wp: winuser::WINDOWPLACEMENT = std::mem::zeroed();
             wp.length = std::mem::size_of::<winuser::WINDOWPLACEMENT>() as u32;
             winuser::GetWindowPlacement(self.hwnd, &mut wp);
             if wp.showCmd as i32 == winuser::SW_MAXIMIZE {

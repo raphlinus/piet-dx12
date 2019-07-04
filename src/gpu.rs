@@ -19,17 +19,17 @@ pub struct GpuState {
     swapchain: dx12::SwapChain3,
     device: dx12::Device,
     render_targets: Vec<dx12::Resource>,
-    compute_targets: Vec<dx12::Resource>,
+    //compute_targets: Vec<dx12::Resource>,
     command_allocator: dx12::CommandAllocator,
     command_queue: dx12::CommandQueue,
-    compute_root_signature: dx12::RootSignature,
+    //compute_root_signature: dx12::RootSignature,
     graphics_root_signature: dx12::RootSignature,
     render_target_view_heap: dx12::DescriptorHeap,
-    compute_target_view_heap: dx12::DescriptorHeap,
+    //compute_target_view_heap: dx12::DescriptorHeap,
     render_target_view_descriptor_size: u32,
-    compute_target_view_descriptor_size: u32,
+    //compute_target_view_descriptor_size: u32,
     graphics_pipeline_state: dx12::PipelineState,
-    compute_pipeline_state: dx12::PipelineState,
+    //compute_pipeline_state: dx12::PipelineState,
     command_list: dx12::GraphicsCommandList,
 
     // synchronizers
@@ -68,24 +68,27 @@ impl GpuState {
             bottom: height as i32,
         };
 
+        #[cfg(debug_assertions)]
+        dx12::enable_debug_layer();
+
         let (
             swapchain,
             device,
             render_targets,
-            compute_targets,
+            //compute_targets,
             command_allocator,
             command_queue,
             render_target_view_heap,
-            compute_target_view_heap,
+            //compute_target_view_heap,
             render_target_view_descriptor_size,
-            compute_target_view_descriptor_size,
+            //compute_target_view_descriptor_size,
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
 
         let (
-            compute_root_signature,
+            //compute_root_signature,
             graphics_root_signature,
-            compute_pipeline_state,
+            //compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
         ) = GpuState::create_pipeline_state(
@@ -108,19 +111,19 @@ impl GpuState {
             scissor_rect,
             swapchain,
             device,
-            compute_targets,
+            //compute_targets,
             render_targets,
             command_allocator,
             command_queue,
-            compute_root_signature,
+            //compute_root_signature,
             graphics_root_signature,
             render_target_view_heap,
-            compute_target_view_heap,
-            compute_pipeline_state,
+            //compute_target_view_heap,
+            //compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
             render_target_view_descriptor_size,
-            compute_target_view_descriptor_size,
+            //compute_target_view_descriptor_size,
             frame_index: 0,
             fence_event,
             fence,
@@ -132,38 +135,39 @@ impl GpuState {
         self.command_allocator.reset();
 
         // compute pipeline call
-        self.command_list.reset(
-            self.command_allocator.clone(),
-            self.compute_pipeline_state.clone(),
-        );
-        self.command_list
-            .set_compute_root_signature(self.compute_root_signature.clone());
-        let transition_intermediate_to_unordered_access = dx12::create_transition_resource_barrier(
-            self.compute_targets[self.frame_index].0.as_raw(),
-            d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        );
-        self.command_list
-            .set_resource_barrier(1, [transition_intermediate_to_unordered_access].as_ptr());
-        let ct_gpu_virtual_address =
-            self.compute_targets[self.frame_index].get_gpu_virtual_address();
-        self.command_list
-            .set_compute_root_unordered_access_view(0, ct_gpu_virtual_address);
-        self.command_list.dispatch(10, 10, 10);
+//        self.command_list.reset(
+//            self.command_allocator.clone(),
+//            self.compute_pipeline_state.clone(),
+//        );
+//        self.command_list
+//            .set_compute_root_signature(self.compute_root_signature.clone());
+//        let transition_intermediate_to_unordered_access = dx12::create_transition_resource_barrier(
+//            self.compute_targets[self.frame_index].0.as_raw(),
+//            d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+//            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+//        );
+//        self.command_list
+//            .set_resource_barrier(1, [transition_intermediate_to_unordered_access].as_ptr());
+//        let ct_gpu_virtual_address =
+//            self.compute_targets[self.frame_index].get_gpu_virtual_address();
+//        self.command_list
+//            .set_compute_root_unordered_access_view(0, ct_gpu_virtual_address);
+//        self.command_list.dispatch(10, 10, 10);
 
         // graphics pipeline call
-        self.command_list
-            .set_pipeline_state(self.graphics_pipeline_state.clone());
+//        self.command_list
+//            .set_pipeline_state(self.graphics_pipeline_state.clone());
+        self.command_list.reset(self.command_allocator.clone(), self.graphics_pipeline_state.clone());
         self.command_list
             .set_graphics_root_signature(self.graphics_root_signature.clone());
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
-        let transition_intermediate_to_pixel_shader_resource =
-            dx12::create_transition_resource_barrier(
-                self.compute_targets[self.frame_index].0.as_raw(),
-                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-            );
+//        let transition_intermediate_to_pixel_shader_resource =
+//            dx12::create_transition_resource_barrier(
+//                self.compute_targets[self.frame_index].0.as_raw(),
+//                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+//                d3d12::D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+//            );
         let transition_render_target_from_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
@@ -172,13 +176,13 @@ impl GpuState {
         self.command_list.set_resource_barrier(
             2,
             [
-                transition_intermediate_to_pixel_shader_resource,
+                //transition_intermediate_to_pixel_shader_resource,
                 transition_render_target_from_present,
             ]
             .as_ptr(),
         );
-        self.command_list
-            .set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
+//        self.command_list
+//            .set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
         let mut rt_descriptor = self.render_target_view_heap.start_cpu_descriptor();
         rt_descriptor.ptr += self.frame_index;
         self.command_list.set_render_target(rt_descriptor);
@@ -244,33 +248,15 @@ impl GpuState {
         dx12::SwapChain3,
         dx12::Device,
         Vec<dx12::Resource>,
-        Vec<dx12::Resource>,
+        //Vec<dx12::Resource>,
         dx12::CommandAllocator,
         dx12::CommandQueue,
         dx12::DescriptorHeap,
-        dx12::DescriptorHeap,
+        //dx12::DescriptorHeap,
         u32,
-        u32,
+        //u32,
         dx12::Fence,
     ) {
-        #[cfg(debug_assertions)]
-        // Enable debug layer
-        {
-            let mut debug_controller: *mut winapi::um::d3d12sdklayers::ID3D12Debug =
-                ptr::null_mut();
-            let hr = unsafe {
-                d3d12::D3D12GetDebugInterface(
-                    &winapi::um::d3d12sdklayers::ID3D12Debug::uuidof(),
-                    &mut debug_controller as *mut *mut _ as *mut *mut _,
-                )
-            };
-
-            if winerror::SUCCEEDED(hr) {
-                (*debug_controller).EnableDebugLayer();
-                (*debug_controller).Release();
-            }
-        }
-
         // create factory4
         let factory4 = dx12::Factory4::create(0);
 
@@ -287,61 +273,61 @@ impl GpuState {
         };
 
         //TODO: command list type okay?
-        let list_type = d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE;
+        let list_type = d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT;
         let command_queue =
             device.create_command_queue(list_type, 0, d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE, 0);
 
         // create compute resource descriptions
-        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
-        let heap_usage_flags = d3d12::D3D12_HEAP_FLAG_NONE;
-        let resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-            //TODO: what alignment should be chosen?
-            Alignment: 0,
-            Width: width as u64,
-            Height: height,
-            DepthOrArraySize: 1,
-            //TODO: what should MipLevels be?
-            MipLevels: 1,
-            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            //essentially we're letting the adapter decide the layout
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-        };
-        let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
-        *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
-
-        // create compute descriptor heap
-        let compute_heap_type = d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        let ct_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
-            Type: compute_heap_type,
-            NumDescriptors: FRAME_COUNT,
-            Flags: heap_usage_flags,
-            NodeMask: 0,
-        };
-        let ctv_heap = device.create_descriptor_heap(&ct_descriptor_heap_desc);
-        let ctv_descriptor_size = device.get_descriptor_increment_size(compute_heap_type);
+//        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+//            //for GPU access only
+//            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+//            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+//            //TODO: what should MemoryPoolPreference flag be?
+//            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+//            //we don't care about multi-adapter operation, so these next two will be zero
+//            CreationNodeMask: 0,
+//            VisibleNodeMask: 0,
+//        };
+//        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
+//        let heap_usage_flags = d3d12::D3D12_HEAP_FLAG_NONE;
+//        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+//            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+//            //TODO: what alignment should be chosen?
+//            Alignment: 0,
+//            Width: width as u64,
+//            Height: height,
+//            DepthOrArraySize: 1,
+//            //TODO: what should MipLevels be?
+//            MipLevels: 1,
+//            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+//            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+//                Count: 1,
+//                Quality: 0,
+//            },
+//            //essentially we're letting the adapter decide the layout
+//            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+//            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+//        };
+//        let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
+//        *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
+//
+//        // create compute descriptor heap
+//        let compute_heap_type = d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+//        let ct_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+//            Type: compute_heap_type,
+//            NumDescriptors: FRAME_COUNT,
+//            Flags: heap_usage_flags,
+//            NodeMask: 0,
+//        };
+//        let ctv_heap = device.create_descriptor_heap(&ct_descriptor_heap_desc);
+//        let ctv_descriptor_size = device.get_descriptor_increment_size(compute_heap_type);
 
         // create swapchain
         let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
-            AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_IGNORE,
-            BufferCount: FRAME_COUNT,
             Width: width,
             Height: height,
+            AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_IGNORE,
+            BufferCount: FRAME_COUNT,
             Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
             Flags: 0,
             BufferUsage: dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -349,18 +335,18 @@ impl GpuState {
                 Count: 1,
                 Quality: 0,
             },
-            Scaling: dxgitype::DXGI_MODE_SCALING_STRETCHED,
-            Stereo: false as _,
+            Scaling: dxgi1_2::DXGI_SCALING_STRETCH,
+            Stereo: winapi::shared::minwindef::FALSE,
             SwapEffect: dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD,
         };
 
-        let swap_chain1 = factory4.create_swapchain_for_hwnd(
+        let swap_chain3 = factory4.create_swapchain_for_hwnd(
             command_queue.clone(),
             wnd.hwnd.clone(),
             swapchain_desc,
         );
 
-        let swap_chain3 = swap_chain1.cast_into_swap_chain3();
+        //let swap_chain3 = swap_chain1.cast_into_swap_chain3();
         // disable full screen transitions
         // winapi does not have DXGI_MWA_NO_ALT_ENTER?
         factory4.0.MakeWindowAssociation(wnd.hwnd, 1);
@@ -377,25 +363,24 @@ impl GpuState {
             device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
         // create frame resources
-        //TODO: still don't understand CPU vs GPU descriptor...
-        let mut ct_cpu_descriptor = ctv_heap.start_cpu_descriptor();
+        //let mut ct_cpu_descriptor = ctv_heap.start_cpu_descriptor();
         let mut rt_cpu_descriptor = rtv_heap.start_cpu_descriptor();
         // create render target and render target view for each frame
-        let mut compute_targets: Vec<dx12::Resource> = Vec::new();
+        //let mut compute_targets: Vec<dx12::Resource> = Vec::new();
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
 
         // just work on getting rasterization working
         for ix in 0..FRAME_COUNT {
-            let compute_target_resource = device.create_committed_resource(
-                &heap_properties,
-                heap_usage_flags,
-                &resource_description,
-                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                &clear_value,
-            );
+//            let compute_target_resource = device.create_committed_resource(
+//                &heap_properties,
+//                heap_usage_flags,
+//                &resource_description,
+//                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+//                ptr::null(),
+//            );
             let render_target_resource = swap_chain3.get_buffer(ix);
 
-            device.create_unordered_access_view(compute_target_resource.clone(), ct_cpu_descriptor);
+//            device.create_unordered_access_view(compute_target_resource.clone(), ct_cpu_descriptor);
             device.create_render_target_view(
                 render_target_resource.clone(),
                 ptr::null(),
@@ -403,10 +388,10 @@ impl GpuState {
             );
 
             // TODO: is this correct?
-            ct_cpu_descriptor.ptr += ctv_descriptor_size as usize;
+            //ct_cpu_descriptor.ptr += ctv_descriptor_size as usize;
             rt_cpu_descriptor.ptr += rtv_descriptor_size as usize;
 
-            compute_targets.push(compute_target_resource.clone());
+            //compute_targets.push(compute_target_resource.clone());
             render_targets.push(render_target_resource.clone());
         }
 
@@ -417,14 +402,14 @@ impl GpuState {
         (
             swap_chain3,
             device,
-            compute_targets,
+            //compute_targets,
             render_targets,
             command_allocator,
             command_queue,
             rtv_heap,
-            ctv_heap,
+            //ctv_heap,
             rtv_descriptor_size,
-            ctv_descriptor_size,
+            //ctv_descriptor_size,
             fence,
         )
     }
@@ -439,43 +424,48 @@ impl GpuState {
         fragment_entry: String,
         command_allocator: dx12::CommandAllocator,
     ) -> (
+        //dx12::RootSignature,
         dx12::RootSignature,
-        dx12::RootSignature,
-        dx12::PipelineState,
+        //dx12::PipelineState,
         dx12::PipelineState,
         dx12::GraphicsCommandList,
     ) {
         // create empty root signature for compute
         // create 1 parameter root signature for graphics
-        let graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
-            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_CBV,
-            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_PIXEL,
-            ..mem::zeroed()
-        };
-        let compute_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+//        let graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+//            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_CBV,
+//            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_PIXEL,
+//            ..mem::zeroed()
+//        };
+//        let compute_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+//            NumParameters: 0,
+//            pParameters: ptr::null(),
+//            NumStaticSamplers: 0,
+//            pStaticSamplers: ptr::null(),
+//            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
+//        };
+//        let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+//            NumParameters: 1,
+//            pParameters: &graphics_root_parameter as *const _,
+//            NumStaticSamplers: 0,
+//            pStaticSamplers: ptr::null(),
+//            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
+//        };
+//        // serialize root signature description and create compute root signature
+//        let blob = dx12::RootSignature::serialize_description(
+//            &compute_root_signature_desc,
+//            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
+//        );
+//        let compute_root_signature = device.create_root_signature(0, blob);
+        let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
             NumParameters: 0,
             pParameters: ptr::null(),
             NumStaticSamplers: 0,
             pStaticSamplers: ptr::null(),
             Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
         };
-        let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 1,
-            pParameters: &graphics_root_parameter as *const _,
-            NumStaticSamplers: 0,
-            pStaticSamplers: ptr::null(),
-            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
-        };
-        // serialize root signature description and create compute root signature
-        //TODO: use error blob?
-        let (blob, _) = dx12::RootSignature::serialize_description(
-            &compute_root_signature_desc,
-            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
-        );
-        let compute_root_signature = device.create_root_signature(0, blob);
         // serialize root signature description and create graphics root signature
-        //TODO: use error blob?
-        let (blob, _) = dx12::RootSignature::serialize_description(
+        let blob= dx12::RootSignature::serialize_description(
             &graphics_root_signature_desc,
             d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
         );
@@ -489,19 +479,17 @@ impl GpuState {
                 | winapi::um::d3dcompiler::D3DCOMPILE_SKIP_OPTIMIZATION;
         }
 
-        // load compute shader
-        //TODO: use error blob?
-        let (compute_shader_blob, _) = dx12::ShaderByteCode::compile(
-            compute_shader_code,
-            String::from("cs_5_0"),
-            compute_entry,
-            flags,
-        );
-        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
+//        // load compute shader
+//        let compute_shader_blob = dx12::ShaderByteCode::compile(
+//            compute_shader_code,
+//            String::from("cs_5_0"),
+//            compute_entry,
+//            flags,
+//        );
+//        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
 
         // load graphics shaders
-        //TODO: use error blob?
-        let (graphics_vertex_shader_blob, _) = dx12::ShaderByteCode::compile(
+        let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile(
             vertex_shader_code,
             String::from("cs_5_0"),
             vertex_entry,
@@ -509,8 +497,7 @@ impl GpuState {
         );
         let graphics_vertex_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
-        //TODO: use error blob?
-        let (graphics_fragment_shader_blob, _) = dx12::ShaderByteCode::compile(
+        let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile(
             fragment_shader_code,
             String::from("cs_5_0"),
             fragment_entry,
@@ -520,17 +507,17 @@ impl GpuState {
             dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
 
         // create compute pipeline state
-        let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
-            pRootSignature: compute_root_signature.0.as_raw(),
-            CS: compute_shader_bytecode.0,
-            NodeMask: 0,
-            CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
-                pCachedBlob: ptr::null(),
-                CachedBlobSizeInBytes: 0,
-            },
-            Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
-        };
-        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
+//        let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
+//            pRootSignature: compute_root_signature.0.as_raw(),
+//            CS: compute_shader_bytecode.0,
+//            NodeMask: 0,
+//            CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
+//                pCachedBlob: ptr::null(),
+//                CachedBlobSizeInBytes: 0,
+//            },
+//            Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
+//        };
+//        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
 
         // create graphics pipeline state
         let graphics_ps_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC {
@@ -604,18 +591,24 @@ impl GpuState {
         let graphics_pipeline_state = device.create_graphics_pipeline_state(&graphics_ps_desc);
 
         // create command list
+//        let command_list = device.create_graphics_command_list(
+//            d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT,
+//            command_allocator.clone(),
+//            compute_pipeline_state.clone(),
+//            0,
+//        );
         let command_list = device.create_graphics_command_list(
-            d3d12::D3D12_COMMAND_LIST_TYPE_COMPUTE,
+            d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT,
             command_allocator.clone(),
-            compute_pipeline_state.clone(),
+            graphics_pipeline_state.clone(),
             0,
         );
         command_list.close();
 
         (
-            compute_root_signature,
+            //compute_root_signature,
             graphics_root_signature,
-            compute_pipeline_state,
+            //compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
         )
