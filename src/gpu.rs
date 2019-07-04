@@ -234,21 +234,26 @@ impl GpuState {
 
     unsafe fn wait_for_render_completion(&mut self) {
         println!("  waiting for render completion...");
+        println!("      signalling command queue...");
         self.command_queue
             .signal(self.fence.clone(), self.fence_value);
         // in the largeness of std::u64::MAX we trust
         self.fence_value = (self.fence_value + 1);
 
+        println!("      getting fence value...");
         if self.fence.get_value() < self.fence_value {
+            println!("      setting event to fire on completion...");
             dx12::error_if_failed_else_none(
                 self.fence
                     .set_event_on_completion(self.fence_event.clone(), self.fence_value),
             )
             .expect("error setting fence event on render completion");
             //TODO: handle return value?
+            println!("      waiting on fence event...");
             self.fence_event.wait(winapi::um::winbase::INFINITE);
         }
 
+        println!("      updating frame index...");
         self.frame_index = self.swapchain.get_current_back_buffer_index() as usize;
     }
 
