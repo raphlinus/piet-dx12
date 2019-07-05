@@ -16,26 +16,29 @@ fn main() {
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));
 
+        let compute_shader_code =
+"#define BLOCK_SIZE 16
+
+".as_bytes();
         let shader_code =
 "struct PSInput
 {
     float4 position : SV_POSITION;
-    float4 color : COLOR;
 };
 
-PSInput VSMain(float4 position : POSITION, float4 color : COLOR)
+PSInput VSMain(float4 position : POSITION)
 {
     PSInput result;
 
     result.position = position;
-    result.color = color;
 
     return result;
 }
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    return input.color;
+    float4 color = {1.0f, 0.0f, 0.0f, 1.0f};
+    return color;
 }
 ".as_bytes();
 

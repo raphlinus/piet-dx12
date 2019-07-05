@@ -665,6 +665,10 @@ impl Event {
     pub unsafe fn wait(&self, timeout_ms: u32) -> u32 {
         synchapi::WaitForSingleObject(self.0, timeout_ms)
     }
+
+    pub unsafe fn wait_ex(&self, timeout_ms: u32, altertable: bool) -> u32 {
+        synchapi::WaitForSingleObjectEx(self.0, timeout_ms, altertable as _)
+    }
 }
 
 impl GraphicsCommandList {

@@ -8,15 +8,38 @@ use winapi::um::{d3d12, d3dcommon};
 use winapi::Interface;
 
 const FRAME_COUNT: u32 = 2;
-pub type TriangleVertexCoordinates = [f32; 3];
-pub type TriangleVertexColor = [f32; 4];
-pub type TriangleVertex = (TriangleVertexCoordinates, TriangleVertexColor);
-const TRIANGLE_VERTICES: [TriangleVertex; 3] = [
-    ([0.0, 0.25, 0.0], [1.0, 0.0, 0.0, 1.0]),
-    ([0.25, -0.25, 0.0], [0.0, 1.0, 0.0, 1.0]),
-    ([-0.25, -0.25, 0.0], [0.0, 0.0, 1.0, 1.0]),
-];
-const CLEAR_COLOR: [f32; 4] = [0.0, 0.2, 0.4, 1.0];
+pub type VertexCoordinates = [f32; 3];
+pub type VertexColor = [f32; 4];
+pub type Vertex = VertexCoordinates;
+
+pub struct Quad {
+    ox: f32,
+    oy: f32,
+    width: f32,
+    height: f32,
+}
+
+impl Quad {
+    fn new(ox: f32, oy: f32, width: f32, height: f32) -> Quad {
+        Quad {
+            ox,
+            oy,
+            width,
+            height
+        }
+    }
+
+    fn as_vertices(&self) -> [Vertex; 4] {
+        [
+            [self.ox, self.oy, 0.0],
+            [self.ox, self.oy + self.height, 0.0],
+            [self.ox + self.width, self.oy, 0.0],
+            [self.ox + self.width, self.oy + self.height, 0.0],
+        ]
+    }
+}
+
+const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 pub struct GpuState {
     width: u32,
@@ -29,7 +52,7 @@ pub struct GpuState {
     device: dx12::Device,
     render_targets: Vec<dx12::Resource>,
     //compute_targets: Vec<dx12::Resource>,
-    command_allocator: dx12::CommandAllocator,
+    command_allocators: Vec<dx12::CommandAllocator>,
     command_queue: dx12::CommandQueue,
     //compute_root_signature: dx12::RootSignature,
     graphics_root_signature: dx12::RootSignature,
@@ -47,7 +70,7 @@ pub struct GpuState {
     frame_index: usize,
     fence_event: dx12::Event,
     fence: dx12::Fence,
-    fence_value: u64,
+    fence_values: Vec<u64>,
 }
 
 impl GpuState {
@@ -59,6 +82,8 @@ impl GpuState {
     ) -> GpuState {
         let width = wnd.get_width();
         let height = wnd.get_height();
+
+        let screen_quad = Quad::new(-1.0*(width as f32/2.0), -1.0*(height as f32/2.0), width as f32, height as f32);
 
         let viewport = d3d12::D3D12_VIEWPORT {
             TopLeftX: 0.0,
@@ -84,7 +109,7 @@ impl GpuState {
             device,
             render_targets,
             //compute_targets,
-            command_allocator,
+            command_allocators,
             command_queue,
             render_target_view_heap,
             //compute_target_view_heap,
@@ -106,12 +131,13 @@ impl GpuState {
             shader_code,
             vertex_entry,
             fragment_entry,
-            command_allocator.clone(),
+            &command_allocators,
+            screen_quad,
         );
 
         let fence_event = dx12::Event::create(false, false);
 
-        GpuState {
+        let mut gpu_state = GpuState {
             width,
             height,
             viewport,
@@ -120,7 +146,7 @@ impl GpuState {
             device,
             //compute_targets,
             render_targets,
-            command_allocator,
+            command_allocators,
             command_queue,
             //compute_root_signature,
             graphics_root_signature,
@@ -134,16 +160,21 @@ impl GpuState {
             frame_index: 0,
             fence_event,
             fence,
-            fence_value: 1,
+            fence_values: (0..FRAME_COUNT).into_iter().map(|_| 1).collect(),
             vertex_buffer,
             vertex_buffer_view,
-        }
+        };
+
+        // wait for upload of any resources to gpu
+        gpu_state.wait_for_gpu();
+
+        gpu_state
     }
 
     unsafe fn populate_command_list(&mut self) {
         println!("  populating command list...");
-        println!("      resetting command allocator...");
-        self.command_allocator.reset();
+        println!("      resetting relevant command allocator...");
+        self.command_allocators[self.frame_index].reset();
 
         // compute pipeline call
 //        self.command_list.reset(
@@ -169,7 +200,7 @@ impl GpuState {
 //        self.command_list
 //            .set_pipeline_state(self.graphics_pipeline_state.clone());
         println!("      resetting command list...");
-        self.command_list.reset(self.command_allocator.clone(), self.graphics_pipeline_state.clone());
+        self.command_list.reset(self.command_allocators[self.frame_index].clone(), self.graphics_pipeline_state.clone());
         println!("      command list: set graphics root signature...");
         self.command_list
             .set_graphics_root_signature(self.graphics_root_signature.clone());
@@ -208,9 +239,9 @@ impl GpuState {
         // Record drawing commands.
         println!("      command list: record draw commands...");
         self.command_list.clear_render_target_view(rt_descriptor, &CLEAR_COLOR);
-        self.command_list.set_primitive_topology(d3dcommon::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        self.command_list.set_primitive_topology(d3dcommon::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         self.command_list.set_vertex_buffer(0, 1, &self.vertex_buffer_view);
-        self.command_list.draw_instanced(3, 1, 0, 0);
+        self.command_list.draw_instanced(4, 1, 0, 0);
 
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
@@ -239,38 +270,39 @@ impl GpuState {
         // TODO: what should the present flags be?
         self.swapchain.present(1, 0);
 
-        self.wait_for_render_completion();
+        self.move_to_next_frame();
     }
 
-    unsafe fn wait_for_render_completion(&mut self) {
-        println!("  waiting for render completion...");
-        
-        println!("      signalling command queue...");
-        self.command_queue
-            .signal(self.fence.clone(), self.fence_value);
-        // in the largeness of std::u64::MAX we trust
+    unsafe fn wait_for_gpu(&mut self) {
+        self.command_queue.signal(self.fence.clone(), self.fence_values[self.frame_index]);
 
-        println!("      getting fence value...");
-        if self.fence.get_value() < self.fence_value {
-            println!("      setting event to fire on completion...");
-            dx12::error_if_failed_else_none(
-                self.fence
-                    .set_event_on_completion(self.fence_event.clone(), self.fence_value),
-            )
-            .expect("error setting fence event on render completion");
-            //TODO: handle return value?
-            println!("      waiting on fence event...");
-            self.fence_event.wait(winapi::um::winbase::INFINITE);
+        //TODO: handle return value
+        self.fence.set_event_on_completion(self.fence_event.clone(), self.fence_values[self.frame_index]);
+        self.fence_event.wait_ex(winapi::um::winbase::INFINITE, false);
+
+        self.fence_values[self.frame_index] = self.fence_values[self.frame_index] + 1;
+
+        self.fence_values[self.frame_index] = self.fence_values[self.frame_index] + 1;
+    }
+
+    unsafe fn move_to_next_frame(&mut self) {
+        let current_fence_value = self.fence_values[self.frame_index];
+        self.command_queue.signal(self.fence.clone(), current_fence_value);
+
+        self.frame_index = self.swapchain.get_current_back_buffer_index() as usize;
+
+        if self.fence.get_value() < self.fence_values[self.frame_index] {
+            self.fence.set_event_on_completion(self.fence_event.clone(), self.fence_values[self.frame_index]);
+            //TODO: handle return value
+            self.fence_event.wait_ex(winapi::um::winbase::INFINITE, false);
         }
 
-        self.fence_value = (self.fence_value + 1);  
-
-        println!("      updating frame index...");
-        self.frame_index = self.swapchain.get_current_back_buffer_index() as usize;
+        self.fence_values[self.frame_index] = current_fence_value + 1;
     }
 
     pub unsafe fn destroy(&mut self) {
-        self.wait_for_render_completion();
+        self.wait_for_gpu();
+
         if winapi::um::handleapi::CloseHandle(self.fence_event.0) == 0 {
             panic!("could not close fence event properly")
         }
@@ -285,7 +317,7 @@ impl GpuState {
         dx12::Device,
         Vec<dx12::Resource>,
         //Vec<dx12::Resource>,
-        dx12::CommandAllocator,
+        Vec<dx12::CommandAllocator>,
         dx12::CommandQueue,
         dx12::DescriptorHeap,
         //dx12::DescriptorHeap,
@@ -405,6 +437,8 @@ impl GpuState {
         //let mut compute_targets: Vec<dx12::Resource> = Vec::new();
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
 
+        let mut command_allocators: Vec<dx12::CommandAllocator> = Vec::new();
+
         // just work on getting rasterization working
         for ix in 0..FRAME_COUNT {
 //            let compute_target_resource = device.create_committed_resource(
@@ -429,9 +463,9 @@ impl GpuState {
 
             //compute_targets.push(compute_target_resource.clone());
             render_targets.push(render_target_resource.clone());
-        }
 
-        let command_allocator = device.create_command_allocator(list_type);
+            command_allocators.push(device.create_command_allocator(list_type));
+        }
 
         let fence = device.create_fence(0);
 
@@ -440,7 +474,7 @@ impl GpuState {
             device,
             //compute_targets,
             render_targets,
-            command_allocator,
+            command_allocators,
             command_queue,
             rtv_heap,
             //ctv_heap,
@@ -455,7 +489,8 @@ impl GpuState {
         shader_code: &[u8],
         vertex_entry: String,
         fragment_entry: String,
-        command_allocator: dx12::CommandAllocator,
+        command_allocators: &Vec<dx12::CommandAllocator>,
+        screen_quad: Quad,
     ) -> (
         //dx12::RootSignature,
         dx12::RootSignature,
@@ -506,8 +541,9 @@ impl GpuState {
         );
         let graphics_root_signature = device.create_root_signature(0, blob);
 
-        let vertex_buffer_stride = mem::size_of::<TriangleVertex>();
-        let vertex_buffer_size = vertex_buffer_stride*TRIANGLE_VERTICES.len();
+        let vertices = screen_quad.as_vertices();
+        let vertex_buffer_stride = mem::size_of::<Vertex>();
+        let vertex_buffer_size = vertex_buffer_stride*vertices.len();
         let vertex_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -531,7 +567,7 @@ impl GpuState {
             ..mem::zeroed()
         };
         let vertex_buffer = device.create_committed_resource(&vertex_buffer_heap_properties, d3d12::D3D12_HEAP_FLAG_NONE, &vertex_buffer_resource_description, d3d12::D3D12_RESOURCE_STATE_GENERIC_READ, ptr::null());
-        vertex_buffer.upload_data_to_resource(vertex_buffer_size, TRIANGLE_VERTICES.as_ptr());
+        vertex_buffer.upload_data_to_resource(vertex_buffer_size, vertices.as_ptr());
         let vertex_buffer_view = d3d12::D3D12_VERTEX_BUFFER_VIEW {
           BufferLocation: vertex_buffer.get_gpu_virtual_address(),
           SizeInBytes: vertex_buffer_size as u32,
@@ -619,17 +655,7 @@ impl GpuState {
             instance_data_step_rate: 0,
         };
 
-        let color_ied = dx12::InputElementDesc {
-            semantic_name: String::from("COLOR"),
-            semantic_index: 0,
-            format: dxgiformat::DXGI_FORMAT_R32G32B32_FLOAT,
-            input_slot: 0,
-            aligned_byte_offset: 12,
-            input_slot_class: d3d12::D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-            instance_data_step_rate: 0,
-        };
-
-        let ieds = [position_ied.as_winapi_struct(), color_ied.as_winapi_struct()];
+        let ieds = [position_ied.as_winapi_struct()];
 
         let graphics_ps_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC {
             pRootSignature: graphics_root_signature.0.as_raw(),
@@ -713,7 +739,7 @@ impl GpuState {
 //        );
         let command_list = device.create_graphics_command_list(
             d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT,
-            command_allocator.clone(),
+            command_allocators[0].clone(),
             graphics_pipeline_state.clone(),
             0,
         );
