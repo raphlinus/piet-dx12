@@ -16,35 +16,34 @@ fn main() {
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));
 
-        let compute_shader_code =
-"#define BLOCK_SIZE 16
-
-".as_bytes();
         let shader_code =
-"struct PSInput
-{
-    float4 position : SV_POSITION;
-};
+"#define BLOCK_SIZE 256
 
-PSInput VSMain(float4 position : POSITION)
-{
-    PSInput result;
+RWTexture2D<float4> canvas;
 
-    result.position = position;
-
-    return result;
+[numthreads(16, 16, 1)]
+void CSMain(uint3 DTid : SV_DispatchThreadID) {
+    float4 color = {0.0f, 1.0f, 0.0f, 1.0f};
+    canvas[DTid.xy] = color;
 }
 
-float4 PSMain(PSInput input) : SV_TARGET
+float4 VSMain(float4 position: POSITION) : SV_Position
 {
-    float4 color = {1.0f, 0.0f, 0.0f, 1.0f};
-    return color;
+    return position;
+}
+
+float4 PSMain(float4 position: SV_Position) : SV_TARGET
+{
+    uint2 pos = position.xy;
+    return canvas[pos.xy];
+
 }
 ".as_bytes();
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
             shader_code,
+            String::from("CSMain"),
             String::from("VSMain"),
             String::from("PSMain"),
         );
