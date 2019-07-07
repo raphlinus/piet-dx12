@@ -122,8 +122,14 @@ impl Factory4 {
     pub unsafe fn create(flags: minwindef::UINT) -> Factory4 {
         let mut factory = ptr::null_mut();
 
+        #[cfg(debug_assertions)]
+        let flags = dxgi1_3::DXGI_CREATE_FACTORY_DEBUG;
+
+        #[cfg(not(debug_assertions))]
+        let flags: u32 = 0;
+
         error_if_failed_else_none(dxgi1_3::CreateDXGIFactory2(
-            0,
+            flags,
             &dxgi1_4::IDXGIFactory4::uuidof(),
             &mut factory as *mut _ as *mut _,
         ))
@@ -878,17 +884,18 @@ pub unsafe fn enable_debug_layer() {
 
     (*debug_controller).EnableDebugLayer();
 
-    //    let mut queue = ptr::null_mut();
-    //    let hr =
-    //        dxgi1_3::DXGIGetDebugInterface1(
-    //            0,
-    //            &dxgidebug::IDXGIInfoQueue::uuidof(),
-    //            &mut queue as *mut _ as *mut _,
-    //        );
-    //
-    //    if winerror::SUCCEEDED(hr) {
-    //        (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
-    //    }
+
+    let mut queue = ptr::null_mut();
+    let hr =
+        dxgi1_3::DXGIGetDebugInterface1(
+            0,
+            &dxgidebug::IDXGIInfoQueue::uuidof(),
+            &mut queue as *mut _ as *mut _,
+        );
+
+    if winerror::SUCCEEDED(hr) {
+        (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
+    }
 
     (*debug_controller).Release();
 }
