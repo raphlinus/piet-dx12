@@ -524,11 +524,11 @@ impl CommandAllocator {
 }
 
 impl DescriptorHeap {
-    pub unsafe fn start_cpu_descriptor(&self) -> CpuDescriptor {
+    pub unsafe fn get_cpu_descriptor_handle_for_heap_start(&self) -> CpuDescriptor {
         self.0.GetCPUDescriptorHandleForHeapStart()
     }
 
-    pub unsafe fn start_gpu_descriptor(&self) -> GpuDescriptor {
+    pub unsafe fn get_gpu_descriptor_handle_for_heap_start(&self) -> GpuDescriptor {
         self.0.GetGPUDescriptorHandleForHeapStart()
     }
 }
@@ -677,8 +677,8 @@ impl Event {
         synchapi::WaitForSingleObject(self.0, timeout_ms)
     }
 
-    pub unsafe fn wait_ex(&self, timeout_ms: u32, altertable: bool) -> u32 {
-        synchapi::WaitForSingleObjectEx(self.0, timeout_ms, altertable as _)
+    pub unsafe fn wait_ex(&self, timeout_ms: u32, alertable: bool) -> u32 {
+        synchapi::WaitForSingleObjectEx(self.0, timeout_ms, alertable as _)
     }
 }
 
@@ -748,6 +748,10 @@ impl GraphicsCommandList {
             .SetComputeRootUnorderedAccessView(root_parameter_index, buffer_location);
     }
 
+    pub unsafe fn set_compute_root_descriptor_table(&self, root_parameter_index: u32, base_descriptor: d3d12::D3D12_GPU_DESCRIPTOR_HANDLE) {
+        self.0.SetComputeRootDescriptorTable(root_parameter_index, base_descriptor);
+    }
+
     pub unsafe fn set_graphics_root_shader_resource_view(
         &self,
         root_parameter_index: u32,
@@ -755,6 +759,10 @@ impl GraphicsCommandList {
     ) {
         self.0
             .SetGraphicsRootShaderResourceView(root_parameter_index, buffer_location);
+    }
+
+    pub unsafe fn set_graphics_root_descriptor_table(&self, root_parameter_index: u32, base_descriptor: d3d12::D3D12_GPU_DESCRIPTOR_HANDLE) {
+        self.0.SetGraphicsRootDescriptorTable(root_parameter_index, base_descriptor);
     }
 
     pub unsafe fn set_render_target(
@@ -797,6 +805,11 @@ impl GraphicsCommandList {
     ) {
         self.0
             .IASetVertexBuffers(start_slot, num_views, vertex_buffer_view as *const _);
+    }
+
+    pub unsafe fn set_descriptor_heaps(&self, descriptor_heaps: Vec<DescriptorHeap>) {
+        let descriptor_heap_pointers: Vec<*mut d3d12::ID3D12DescriptorHeap> = descriptor_heaps.iter().map(|dh| dh.0.as_raw()).collect();
+        self.0.SetDescriptorHeaps(descriptor_heap_pointers.len() as u32, (&descriptor_heap_pointers).as_ptr() as *mut _);
     }
 }
 

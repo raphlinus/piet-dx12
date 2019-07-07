@@ -16,7 +16,8 @@ fn main() {
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));
 
-        let shader_code = "#define BLOCK_SIZE 256
+        let shader_code =
+"#define BLOCK_SIZE 256
 
 RWTexture2D<float4> canvas;
 
@@ -33,8 +34,10 @@ float4 VSMain(float4 position: POSITION) : SV_Position
 
 float4 PSMain(float4 position: SV_Position) : SV_TARGET
 {
-    uint2 pos = position.xy;
-    return canvas[pos.xy];
+    //uint2 pos = position.xy;
+    //return canvas[pos.xy];
+    float4 color = {0.0f, 1.0f, 0.0f, 1.0f};
+    return color;
 }
 "
         .as_bytes();
