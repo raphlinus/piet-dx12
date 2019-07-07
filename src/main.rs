@@ -16,8 +16,7 @@ fn main() {
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));
 
-        let shader_code =
-"#define BLOCK_SIZE 256
+        let shader_code = "#define BLOCK_SIZE 256
 
 RWTexture2D<float4> canvas;
 
@@ -36,9 +35,9 @@ float4 PSMain(float4 position: SV_Position) : SV_TARGET
 {
     uint2 pos = position.xy;
     return canvas[pos.xy];
-
 }
-".as_bytes();
+"
+        .as_bytes();
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,

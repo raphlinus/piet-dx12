@@ -2,8 +2,8 @@ extern crate winapi;
 extern crate wio;
 
 use std::{ffi, mem, ptr};
-use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, minwindef, windef, winerror, dxgiformat};
-use winapi::um::{d3d12, d3dcommon, synchapi, winnt, d3d12sdklayers, dxgidebug};
+use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
+use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
 
@@ -102,8 +102,13 @@ pub fn error_if_failed_else_none(hresult: winerror::HRESULT) -> Result<(), winer
 impl Resource {
     pub unsafe fn upload_data_to_resource<T>(&self, count: usize, data: *const T) {
         let mut mapped_memory = ptr::null_mut();
-        let zero_range = d3d12::D3D12_RANGE {..mem::zeroed()};
-        error_if_failed_else_none(self.0.Map(0, &zero_range as *const _, &mut mapped_memory as *mut _ as *mut _)).expect("could not get pointer to mapped memory");
+        let zero_range = d3d12::D3D12_RANGE { ..mem::zeroed() };
+        error_if_failed_else_none(self.0.Map(
+            0,
+            &zero_range as *const _,
+            &mut mapped_memory as *mut _ as *mut _,
+        ))
+        .expect("could not get pointer to mapped memory");
         ptr::copy(data, mapped_memory, count);
         self.0.Unmap(0, ptr::null());
     }
@@ -152,7 +157,7 @@ impl Factory4 {
             ptr::null_mut(),
             &mut swap_chain as *mut _ as *mut _,
         ))
-            .expect("could not creation swapchain for hwnd");
+        .expect("could not creation swapchain for hwnd");
 
         SwapChain3(ComPtr::from_raw(swap_chain))
     }
@@ -233,7 +238,12 @@ impl SwapChain3 {
 
     pub unsafe fn present(&self, interval: u32, flags: u32) {
         println!("  asking swapchain to present...");
-        error_if_failed_else_none(self.0.Present1(interval, flags, &dxgi1_2::DXGI_PRESENT_PARAMETERS{ ..mem::zeroed() } as *const _)).expect("could not present to swapchain");
+        error_if_failed_else_none(self.0.Present1(
+            interval,
+            flags,
+            &dxgi1_2::DXGI_PRESENT_PARAMETERS { ..mem::zeroed() } as *const _,
+        ))
+        .expect("could not present to swapchain");
         println!("  present successful.");
     }
 }
@@ -541,7 +551,8 @@ impl RootSignature {
             version,
             &mut blob as *mut _ as *mut _,
             &mut _error as *mut _ as *mut _,
-        )).expect("could not serialize root signature description");
+        ))
+        .expect("could not serialize root signature description");
 
         Blob(ComPtr::from_raw(blob))
     }
@@ -632,7 +643,7 @@ impl ShaderByteCode {
             &mut shader as *mut _ as *mut _,
             &mut _error as *mut _ as *mut _,
         ))
-            .expect("could not compile shader code");
+        .expect("could not compile shader code");
 
         Blob(ComPtr::from_raw(shader))
     }
@@ -680,12 +691,9 @@ impl GraphicsCommandList {
         self.0.Close()
     }
 
-    pub unsafe fn reset(
-        &self,
-        allocator: CommandAllocator,
-        initial_pso: PipelineState,
-    )  {
-        error_if_failed_else_none(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw())).expect("could not reset command list");
+    pub unsafe fn reset(&self, allocator: CommandAllocator, initial_pso: PipelineState) {
+        error_if_failed_else_none(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw()))
+            .expect("could not reset command list");
     }
 
     pub unsafe fn set_compute_root_signature(&self, signature: RootSignature) {
@@ -761,16 +769,34 @@ impl GraphicsCommandList {
         );
     }
 
-    pub unsafe fn clear_render_target_view(&self, render_target_descriptor: d3d12::D3D12_CPU_DESCRIPTOR_HANDLE, clear_color: &[f32; 4]) {
-        self.0.ClearRenderTargetView(render_target_descriptor, clear_color as *const _, 0, ptr::null());
+    pub unsafe fn clear_render_target_view(
+        &self,
+        render_target_descriptor: d3d12::D3D12_CPU_DESCRIPTOR_HANDLE,
+        clear_color: &[f32; 4],
+    ) {
+        self.0.ClearRenderTargetView(
+            render_target_descriptor,
+            clear_color as *const _,
+            0,
+            ptr::null(),
+        );
     }
 
-    pub unsafe fn set_primitive_topology(&self, primitive_topology: d3dcommon::D3D_PRIMITIVE_TOPOLOGY) {
+    pub unsafe fn set_primitive_topology(
+        &self,
+        primitive_topology: d3dcommon::D3D_PRIMITIVE_TOPOLOGY,
+    ) {
         self.0.IASetPrimitiveTopology(primitive_topology);
     }
 
-    pub unsafe fn set_vertex_buffer(&self, start_slot: u32, num_views: u32, vertex_buffer_view: &d3d12::D3D12_VERTEX_BUFFER_VIEW) {
-        self.0.IASetVertexBuffers(start_slot, num_views, vertex_buffer_view as *const _);
+    pub unsafe fn set_vertex_buffer(
+        &self,
+        start_slot: u32,
+        num_views: u32,
+        vertex_buffer_view: &d3d12::D3D12_VERTEX_BUFFER_VIEW,
+    ) {
+        self.0
+            .IASetVertexBuffers(start_slot, num_views, vertex_buffer_view as *const _);
     }
 }
 
@@ -834,21 +860,22 @@ pub unsafe fn enable_debug_layer() {
     error_if_failed_else_none(d3d12::D3D12GetDebugInterface(
         &d3d12sdklayers::ID3D12Debug1::uuidof(),
         &mut debug_controller as *mut _ as *mut _,
-    )).expect("could not create debug controller");
+    ))
+    .expect("could not create debug controller");
 
     (*debug_controller).EnableDebugLayer();
 
-//    let mut queue = ptr::null_mut();
-//    let hr =
-//        dxgi1_3::DXGIGetDebugInterface1(
-//            0,
-//            &dxgidebug::IDXGIInfoQueue::uuidof(),
-//            &mut queue as *mut _ as *mut _,
-//        );
-//
-//    if winerror::SUCCEEDED(hr) {
-//        (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
-//    }
+    //    let mut queue = ptr::null_mut();
+    //    let hr =
+    //        dxgi1_3::DXGIGetDebugInterface1(
+    //            0,
+    //            &dxgidebug::IDXGIInfoQueue::uuidof(),
+    //            &mut queue as *mut _ as *mut _,
+    //        );
+    //
+    //    if winerror::SUCCEEDED(hr) {
+    //        (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
+    //    }
 
     (*debug_controller).Release();
 }
@@ -866,7 +893,9 @@ pub struct InputElementDesc {
 impl InputElementDesc {
     pub fn as_winapi_struct(&self) -> d3d12::D3D12_INPUT_ELEMENT_DESC {
         d3d12::D3D12_INPUT_ELEMENT_DESC {
-            SemanticName: std::ffi::CString::new(self.semantic_name.as_str()).unwrap().into_raw() as *const _,
+            SemanticName: std::ffi::CString::new(self.semantic_name.as_str())
+                .unwrap()
+                .into_raw() as *const _,
             SemanticIndex: self.semantic_index,
             Format: self.format,
             InputSlot: self.input_slot,
@@ -876,4 +905,3 @@ impl InputElementDesc {
         }
     }
 }
-

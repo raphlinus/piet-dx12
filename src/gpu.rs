@@ -3,7 +3,7 @@ extern crate winapi;
 use crate::dx12;
 use crate::window;
 use std::{mem, ptr};
-use winapi::shared::{dxgi, dxgi1_2, dxgitype, minwindef, winerror, dxgiformat};
+use winapi::shared::{dxgi, dxgi1_2, dxgiformat, dxgitype, minwindef, winerror};
 use winapi::um::{d3d12, d3dcommon};
 use winapi::Interface;
 
@@ -25,7 +25,7 @@ impl Quad {
             ox,
             oy,
             width,
-            height
+            height,
         }
     }
 
@@ -72,8 +72,8 @@ pub struct GpuState {
     fence: dx12::Fence,
     fence_values: Vec<u64>,
 
-    num_threadgroups_x: u32,
-    num_threadgroups_y: u32,
+    num_dispatch_threadgroups_x: u32,
+    num_dispatch_threadgroups_y: u32,
 }
 
 impl GpuState {
@@ -87,11 +87,16 @@ impl GpuState {
         let width = wnd.get_width();
         let height = wnd.get_height();
 
-        let canvas_quad_width = ((width as f32)/16.0).ceil()*16.0;
-        let canvas_quad_height = ((height as f32)/16.0).ceil()*16.0;
-        let num_threadgroups_x = (canvas_quad_width/16.0) as u32;
-        let num_threadgroups_y = (canvas_quad_height/16.0) as u32;
-        let canvas_quad = Quad::new(-1.0*(canvas_quad_width/2.0), -1.0*(canvas_quad_height/2.0), canvas_quad_width, canvas_quad_height);
+        let canvas_quad_width = ((width as f32) / 16.0).ceil() * 16.0;
+        let canvas_quad_height = ((height as f32) / 16.0).ceil() * 16.0;
+        let num_dispatch_threadgroups_x = (canvas_quad_width / 16.0) as u32;
+        let num_dispatch_threadgroups_y = (canvas_quad_height / 16.0) as u32;
+        let canvas_quad = Quad::new(
+            -1.0 * (canvas_quad_width / 2.0),
+            -1.0 * (canvas_quad_height / 2.0),
+            canvas_quad_width,
+            canvas_quad_height,
+        );
 
         let viewport = d3d12::D3D12_VIEWPORT {
             TopLeftX: 0.0,
@@ -128,15 +133,16 @@ impl GpuState {
 
         let (
             compute_root_signature,
-            graphics_root_signature,
             compute_pipeline_state,
+            graphics_root_signature,
             graphics_pipeline_state,
-            command_list,
             vertex_buffer,
             vertex_buffer_view,
-        ) = GpuState::create_pipeline_state(
+            command_list,
+        ) = GpuState::create_pipeline_states(
             &device,
             shader_code,
+            compute_entry,
             vertex_entry,
             fragment_entry,
             &command_allocators,
@@ -171,8 +177,8 @@ impl GpuState {
             fence_values: (0..FRAME_COUNT).into_iter().map(|_| 1).collect(),
             vertex_buffer,
             vertex_buffer_view,
-            num_threadgroups_x,
-            num_threadgroups_y,
+            num_dispatch_threadgroups_x,
+            num_dispatch_threadgroups_y,
         };
 
         // wait for upload of any resources to gpu
@@ -189,7 +195,7 @@ impl GpuState {
         // compute pipeline call
         println!("      resetting command list...");
         self.command_list.reset(
-            self.command_allocator.clone(),
+            self.command_allocators[self.frame_index].clone(),
             self.compute_pipeline_state.clone(),
         );
         println!("      command list: set compute root signature...");
@@ -201,13 +207,20 @@ impl GpuState {
         println!("      command list: set compute target UAV...");
         self.command_list
             .set_compute_root_unordered_access_view(0, ct_gpu_virtual_address);
-        self.command_list.dispatch(self.num_dispatch_threadgroups_x, self.num_dispatch_threadgroups_y, 1);
+        self.command_list.dispatch(
+            self.num_dispatch_threadgroups_x,
+            self.num_dispatch_threadgroups_y,
+            1,
+        );
 
         // graphics pipeline call
         println!("      setting command list pipeline state to graphics...");
         self.command_list
             .set_pipeline_state(self.graphics_pipeline_state.clone());
-        self.command_list.reset(self.command_allocators[self.frame_index].clone(), self.graphics_pipeline_state.clone());
+        self.command_list.reset(
+            self.command_allocators[self.frame_index].clone(),
+            self.graphics_pipeline_state.clone(),
+        );
         println!("      command list: set graphics root signature...");
         self.command_list
             .set_graphics_root_signature(self.graphics_root_signature.clone());
@@ -232,16 +245,21 @@ impl GpuState {
         self.command_list
             .set_graphics_root_shader_resource_view(0, ct_gpu_virtual_address);
         let mut rt_descriptor = self.render_target_view_heap.start_cpu_descriptor();
-        let rt_descriptor_size = self.device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        rt_descriptor.ptr += self.frame_index*(rt_descriptor_size as usize);
+        let rt_descriptor_size = self
+            .device
+            .get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        rt_descriptor.ptr += self.frame_index * (rt_descriptor_size as usize);
         println!("      command list: set render target...");
         self.command_list.set_render_target(rt_descriptor);
 
         // Record drawing commands.
         println!("      command list: record draw commands...");
-        self.command_list.clear_render_target_view(rt_descriptor, &CLEAR_COLOR);
-        self.command_list.set_primitive_topology(d3dcommon::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        self.command_list.set_vertex_buffer(0, 1, &self.vertex_buffer_view);
+        self.command_list
+            .clear_render_target_view(rt_descriptor, &CLEAR_COLOR);
+        self.command_list
+            .set_primitive_topology(d3dcommon::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        self.command_list
+            .set_vertex_buffer(0, 1, &self.vertex_buffer_view);
         self.command_list.draw_instanced(4, 1, 0, 0);
 
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
@@ -275,11 +293,16 @@ impl GpuState {
     }
 
     unsafe fn wait_for_gpu(&mut self) {
-        self.command_queue.signal(self.fence.clone(), self.fence_values[self.frame_index]);
+        self.command_queue
+            .signal(self.fence.clone(), self.fence_values[self.frame_index]);
 
         //TODO: handle return value
-        self.fence.set_event_on_completion(self.fence_event.clone(), self.fence_values[self.frame_index]);
-        self.fence_event.wait_ex(winapi::um::winbase::INFINITE, false);
+        self.fence.set_event_on_completion(
+            self.fence_event.clone(),
+            self.fence_values[self.frame_index],
+        );
+        self.fence_event
+            .wait_ex(winapi::um::winbase::INFINITE, false);
 
         self.fence_values[self.frame_index] = self.fence_values[self.frame_index] + 1;
 
@@ -288,14 +311,19 @@ impl GpuState {
 
     unsafe fn move_to_next_frame(&mut self) {
         let current_fence_value = self.fence_values[self.frame_index];
-        self.command_queue.signal(self.fence.clone(), current_fence_value);
+        self.command_queue
+            .signal(self.fence.clone(), current_fence_value);
 
         self.frame_index = self.swapchain.get_current_back_buffer_index() as usize;
 
         if self.fence.get_value() < self.fence_values[self.frame_index] {
-            self.fence.set_event_on_completion(self.fence_event.clone(), self.fence_values[self.frame_index]);
+            self.fence.set_event_on_completion(
+                self.fence_event.clone(),
+                self.fence_values[self.frame_index],
+            );
             //TODO: handle return value
-            self.fence_event.wait_ex(winapi::um::winbase::INFINITE, false);
+            self.fence_event
+                .wait_ex(winapi::um::winbase::INFINITE, false);
         }
 
         self.fence_values[self.frame_index] = current_fence_value + 1;
@@ -385,7 +413,7 @@ impl GpuState {
         let ct_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: compute_heap_type,
             NumDescriptors: FRAME_COUNT,
-            Flags: heap_usage_flags,
+            Flags: compute_heap_usage_flags,
             NodeMask: 0,
         };
         let ctv_heap = device.create_descriptor_heap(&ct_descriptor_heap_desc);
@@ -444,7 +472,7 @@ impl GpuState {
             let compute_target_resource = device.create_committed_resource(
                 &compute_heap_properties,
                 compute_heap_usage_flags,
-                &compute_resource_description,
+                &compute_resource_desc,
                 d3d12::D3D12_RESOURCE_STATE_COMMON,
                 ptr::null(),
             );
@@ -484,41 +512,32 @@ impl GpuState {
         )
     }
 
-    unsafe fn create_pipeline_state(
+    unsafe fn create_compute_pipeline_state(
         device: &dx12::Device,
         shader_code: &[u8],
-        vertex_entry: String,
-        fragment_entry: String,
-        command_allocators: &Vec<dx12::CommandAllocator>,
-        screen_quad: Quad,
-    ) -> (
-        dx12::RootSignature,
-        dx12::RootSignature,
-        dx12::PipelineState,
-        dx12::PipelineState,
-        dx12::GraphicsCommandList,
-        dx12::Resource,
-        d3d12::D3D12_VERTEX_BUFFER_VIEW,
-    ) {
-        // create empty root signature for compute
-        // create 1 parameter root signature for graphics
-        let graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
-            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_CBV,
-            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_PIXEL,
+        shader_compile_flags: minwindef::DWORD,
+        compute_entry: String,
+    ) -> (dx12::RootSignature, dx12::PipelineState) {
+        // create 1 root parameter for compute
+        let canvas_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
             ..mem::zeroed()
         };
+        let canvas_uav_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: 1,
+            pDescriptorRanges: &canvas_uav_descriptor_range as *const _,
+        };
+        let mut compute_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
+            ..mem::zeroed()
+        };
+        *compute_root_parameter.u.DescriptorTable_mut() = canvas_uav_table;
 
         let compute_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 0,
-            pParameters: ptr::null(),
-            NumStaticSamplers: 0,
-            pStaticSamplers: ptr::null(),
-            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
-        };
-
-        let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
             NumParameters: 1,
-            pParameters: &graphics_root_parameter as *const _,
+            pParameters: &compute_root_parameter as *const _,
             NumStaticSamplers: 0,
             pStaticSamplers: ptr::null(),
             Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
@@ -531,8 +550,73 @@ impl GpuState {
         );
         let compute_root_signature = device.create_root_signature(0, blob);
 
+        // load compute shader
+        println!("compiling compute shader code...");
+        let compute_shader_blob = dx12::ShaderByteCode::compile(
+            shader_code,
+            String::from("cs_5_0"),
+            compute_entry,
+            shader_compile_flags,
+        );
+        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
+
+        // create compute pipeline state
+        println!("creating compute pipeline state...");
+        let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
+            pRootSignature: compute_root_signature.0.as_raw(),
+            CS: compute_shader_bytecode.bytecode,
+            NodeMask: 0,
+            CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
+                pCachedBlob: ptr::null(),
+                CachedBlobSizeInBytes: 0,
+            },
+            Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
+        };
+        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
+
+        (compute_root_signature, compute_pipeline_state)
+    }
+
+    unsafe fn create_graphics_pipeline_state(
+        device: &dx12::Device,
+        shader_code: &[u8],
+        shader_compile_flags: minwindef::DWORD,
+        vertex_entry: String,
+        fragment_entry: String,
+        screen_quad: Quad,
+    ) -> (
+        dx12::RootSignature,
+        dx12::PipelineState,
+        dx12::Resource,
+        d3d12::D3D12_VERTEX_BUFFER_VIEW,
+    ) {
+        // create 1 root parameter for graphics
+        let frag_shader_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            ..mem::zeroed()
+        };
+        let frag_shader_srv_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: 1,
+            pDescriptorRanges: &frag_shader_srv_descriptor_range as *const _,
+        };
+        let mut graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_PIXEL,
+            ..mem::zeroed()
+        };
+        *graphics_root_parameter.u.DescriptorTable_mut() = frag_shader_srv_table;
+
+        let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+            NumParameters: 1,
+            pParameters: &graphics_root_parameter as *const _,
+            NumStaticSamplers: 0,
+            pStaticSamplers: ptr::null(),
+            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
+        };
+
         // serialize root signature description and create graphics root signature
-        let blob= dx12::RootSignature::serialize_description(
+        let blob = dx12::RootSignature::serialize_description(
             &graphics_root_signature_desc,
             d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
         );
@@ -540,7 +624,7 @@ impl GpuState {
 
         let vertices = screen_quad.as_vertices();
         let vertex_buffer_stride = mem::size_of::<Vertex>();
-        let vertex_buffer_size = vertex_buffer_stride*vertices.len();
+        let vertex_buffer_size = vertex_buffer_stride * vertices.len();
         let vertex_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -565,85 +649,60 @@ impl GpuState {
             ..mem::zeroed()
         };
 
-        let vertex_buffer = device.create_committed_resource(&vertex_buffer_heap_properties, d3d12::D3D12_HEAP_FLAG_NONE, &vertex_buffer_resource_description, d3d12::D3D12_RESOURCE_STATE_GENERIC_READ, ptr::null());
+        let vertex_buffer = device.create_committed_resource(
+            &vertex_buffer_heap_properties,
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &vertex_buffer_resource_description,
+            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            ptr::null(),
+        );
         vertex_buffer.upload_data_to_resource(vertex_buffer_size, vertices.as_ptr());
         let vertex_buffer_view = d3d12::D3D12_VERTEX_BUFFER_VIEW {
-          BufferLocation: vertex_buffer.get_gpu_virtual_address(),
-          SizeInBytes: vertex_buffer_size as u32,
-          StrideInBytes: vertex_buffer_stride as u32,
+            BufferLocation: vertex_buffer.get_gpu_virtual_address(),
+            SizeInBytes: vertex_buffer_size as u32,
+            StrideInBytes: vertex_buffer_stride as u32,
         };
-
-        let mut flags: minwindef::DWORD = 0;
-
-        #[cfg(debug_assertions)]
-        {
-            flags = winapi::um::d3dcompiler::D3DCOMPILE_DEBUG
-                | winapi::um::d3dcompiler::D3DCOMPILE_SKIP_OPTIMIZATION;
-        }
-
-        // load compute shader
-        println!("compiling compute shader code...");
-        let compute_shader_blob = dx12::ShaderByteCode::compile(
-            shader_code,
-            String::from("cs_5_0"),
-            compute_entry,
-            flags,
-        );
-        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
 
         // load graphics shaders from byte string
         println!("compiling vertex shader code...");
-        let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile(
+        let graphics_vertex_shader_blob = dx12::ShaderByteCode::compile(
             shader_code,
             String::from("vs_5_0"),
             vertex_entry,
-            flags,
+            shader_compile_flags,
         );
         let graphics_vertex_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
 
         println!("compiling fragment shader code...");
-        let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile(
+        let graphics_fragment_shader_blob = dx12::ShaderByteCode::compile(
             shader_code,
             String::from("ps_5_0"),
             fragment_entry,
-            flags,
+            shader_compile_flags,
         );
         let graphics_fragment_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
 
         // load graphics shaders from file
-//        println!("compiling vertex shader code...");
-//        let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile_from_file(
-//            String::from("A:\\piet-dx12\\resources\\shaders.hlsl"),
-//            String::from("vs_5_0"),
-//            vertex_entry,
-//            flags,
-//        );
-//        let graphics_vertex_shader_bytecode =
-//            dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
-//        println!("compiling fragment shader code...");
-//        let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile_from_file(
-//            String::from("A:\\piet-dx12\\resources\\shaders.hlsl"),
-//            String::from("ps_5_0"),
-//            fragment_entry,
-//            flags,
-//        );
-//        let graphics_fragment_shader_bytecode =
-//            dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
-
-        // create compute pipeline state
-        let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
-            pRootSignature: compute_root_signature.0.as_raw(),
-            CS: compute_shader_bytecode.0,
-            NodeMask: 0,
-            CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
-                pCachedBlob: ptr::null(),
-                CachedBlobSizeInBytes: 0,
-            },
-            Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
-        };
-        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
+        //        println!("compiling vertex shader code...");
+        //        let graphics_vertex_shader_blob= dx12::ShaderByteCode::compile_from_file(
+        //            String::from("A:\\piet-dx12\\resources\\shaders.hlsl"),
+        //            String::from("vs_5_0"),
+        //            vertex_entry,
+        //            flags,
+        //        );
+        //        let graphics_vertex_shader_bytecode =
+        //            dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
+        //        println!("compiling fragment shader code...");
+        //        let graphics_fragment_shader_blob= dx12::ShaderByteCode::compile_from_file(
+        //            String::from("A:\\piet-dx12\\resources\\shaders.hlsl"),
+        //            String::from("ps_5_0"),
+        //            fragment_entry,
+        //            flags,
+        //        );
+        //        let graphics_fragment_shader_bytecode =
+        //            dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
 
         // create graphics pipeline state
         let position_ied = dx12::InputElementDesc {
@@ -731,10 +790,60 @@ impl GpuState {
         };
         let graphics_pipeline_state = device.create_graphics_pipeline_state(&graphics_ps_desc);
 
+        (
+            graphics_root_signature,
+            graphics_pipeline_state,
+            vertex_buffer,
+            vertex_buffer_view,
+        )
+    }
+
+    unsafe fn create_pipeline_states(
+        device: &dx12::Device,
+        shader_code: &[u8],
+        compute_entry: String,
+        vertex_entry: String,
+        fragment_entry: String,
+        command_allocators: &Vec<dx12::CommandAllocator>,
+        screen_quad: Quad,
+    ) -> (
+        dx12::RootSignature,
+        dx12::PipelineState,
+        dx12::RootSignature,
+        dx12::PipelineState,
+        dx12::Resource,
+        d3d12::D3D12_VERTEX_BUFFER_VIEW,
+        dx12::GraphicsCommandList,
+    ) {
+        #[cfg(not(debug_assertions))]
+        let shader_compile_flags: minwindef::DWORD = 0;
+
+        #[cfg(debug_assertions)]
+        let shader_compile_flags: minwindef::DWORD = winapi::um::d3dcompiler::D3DCOMPILE_DEBUG
+            | winapi::um::d3dcompiler::D3DCOMPILE_SKIP_OPTIMIZATION;
+
+        let (compute_root_signature, compute_pipeline_state) =
+            GpuState::create_compute_pipeline_state(
+                device,
+                shader_code,
+                shader_compile_flags,
+                compute_entry,
+            );
+
+        let (graphics_root_signature, graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
+            GpuState::create_graphics_pipeline_state(
+                device,
+                shader_code,
+                shader_compile_flags,
+                vertex_entry,
+                fragment_entry,
+                screen_quad,
+            );
+
         // create command list
         let command_list = device.create_graphics_command_list(
             d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT,
-            command_allocator.clone(),
+            command_allocators[0].clone(),
             compute_pipeline_state.clone(),
             0,
         );
@@ -743,12 +852,12 @@ impl GpuState {
 
         (
             compute_root_signature,
-            graphics_root_signature,
             compute_pipeline_state,
+            graphics_root_signature,
             graphics_pipeline_state,
-            command_list,
             vertex_buffer,
             vertex_buffer_view,
+            command_list,
         )
     }
 }
