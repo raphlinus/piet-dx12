@@ -58,6 +58,7 @@ pub struct GpuState {
     graphics_root_signature: dx12::RootSignature,
     rtv_descriptor_heap: dx12::DescriptorHeap,
     compute_target_descriptor_heap: dx12::DescriptorHeap,
+    compute_target_descriptor_size: u32,
     rtv_descriptor_size: u32,
     graphics_pipeline_state: dx12::PipelineState,
     compute_pipeline_state: dx12::PipelineState,
@@ -125,6 +126,7 @@ impl GpuState {
             command_queue,
             compute_target_descriptor_heap,
             rtv_descriptor_heap,
+            compute_target_descriptor_size,
             rtv_descriptor_size,
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
@@ -167,6 +169,7 @@ impl GpuState {
             compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
+            compute_target_descriptor_size,
             rtv_descriptor_size,
             frame_index: 0,
             fence_event,
@@ -199,8 +202,12 @@ impl GpuState {
         self.command_list
             .set_compute_root_signature(self.compute_root_signature.clone());
         self.command_list.set_descriptor_heaps(vec![self.compute_target_descriptor_heap.clone()]);
-        self.command_list.set_compute_root_descriptor_table(0, self.compute_target_descriptor_heap.get_gpu_descriptor_handle_for_heap_start());
+        let mut ct_descriptor = self.compute_target_descriptor_heap.get_gpu_descriptor_handle_for_heap_start();
+        ct_descriptor.ptr += ((self.compute_target_descriptor_size as usize) * self.frame_index) as u64;
+        self.command_list.set_compute_root_descriptor_table(0, ct_descriptor);
         self.command_list.dispatch(self.num_dispatch_threadgroups_x, self.num_dispatch_threadgroups_y, 1);
+
+        // need to transition resource between compute and graphics?
 
         // graphics pipeline call
         println!("      setting command list pipeline state to graphics...");
@@ -211,7 +218,7 @@ impl GpuState {
             .set_graphics_root_signature(self.graphics_root_signature.clone());
         println!("      command list: set viewport...");
         self.command_list.set_descriptor_heaps(vec![self.compute_target_descriptor_heap.clone()]);
-        self.command_list.set_graphics_root_descriptor_table(0, self.compute_target_descriptor_heap.get_gpu_descriptor_handle_for_heap_start());
+        self.command_list.set_graphics_root_descriptor_table(0, ct_descriptor);
         self.command_list.set_viewport(&self.viewport);
         println!("      command list: set scissor rect...");
         self.command_list.set_scissor_rect(&self.scissor_rect);
@@ -336,6 +343,7 @@ impl GpuState {
         dx12::DescriptorHeap,
         dx12::DescriptorHeap,
         u32,
+        u32,
         dx12::Fence,
     ) {
         // create factory4
@@ -400,6 +408,7 @@ impl GpuState {
             NodeMask: 0,
         };
         let compute_target_descriptor_heap = device.create_descriptor_heap(&ct_descriptor_heap_desc);
+        let compute_target_descriptor_size = device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         // create swapchain
         let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
@@ -484,6 +493,7 @@ impl GpuState {
             command_queue,
             compute_target_descriptor_heap,
             rtv_descriptor_heap,
+            compute_target_descriptor_size,
             rtv_descriptor_size,
             fence,
         )
