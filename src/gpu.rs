@@ -210,6 +210,8 @@ impl GpuState {
         self.command_list
             .set_graphics_root_signature(self.graphics_root_signature.clone());
         println!("      command list: set viewport...");
+        self.command_list.set_descriptor_heaps(vec![self.compute_target_descriptor_heap.clone()]);
+        self.command_list.set_graphics_root_descriptor_table(0, self.compute_target_descriptor_heap.get_gpu_descriptor_handle_for_heap_start());
         self.command_list.set_viewport(&self.viewport);
         println!("      command list: set scissor rect...");
         self.command_list.set_scissor_rect(&self.scissor_rect);
@@ -583,8 +585,8 @@ impl GpuState {
         *graphics_root_parameter.u.DescriptorTable_mut() = frag_shader_srv_table;
 
         let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 0,
-            pParameters: ptr::null(),//&graphics_root_parameter as *const _,
+            NumParameters: 1,
+            pParameters: &graphics_root_parameter as *const _,
             NumStaticSamplers: 0,
             pStaticSamplers: ptr::null(),
             Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,

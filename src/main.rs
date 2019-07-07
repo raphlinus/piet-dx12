@@ -23,7 +23,7 @@ RWTexture2D<float4> canvas;
 
 [numthreads(16, 16, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
-    float4 color = {0.0f, 1.0f, 0.0f, 1.0f};
+    float4 color = {0.0f, 0.0f, 1.0f, 1.0f};
     canvas[DTid.xy] = color;
 }
 
@@ -34,10 +34,10 @@ float4 VSMain(float4 position: POSITION) : SV_Position
 
 float4 PSMain(float4 position: SV_Position) : SV_TARGET
 {
-    //uint2 pos = position.xy;
-    //return canvas[pos.xy];
-    float4 color = {0.0f, 1.0f, 0.0f, 1.0f};
-    return color;
+    uint2 pos = position.xy;
+    return canvas[pos.xy];
+    //float4 color = {0.0f, 1.0f, 0.0f, 1.0f};
+    //return color;
 }
 "
         .as_bytes();
