@@ -531,7 +531,7 @@ impl GpuState {
         println!("compiling compute shader code...");
         let compute_shader_blob = dx12::ShaderByteCode::compile(
             shader_code,
-            String::from("cs_5_0"),
+            String::from("cs_5_1"),
             compute_entry,
             shader_compile_flags,
         );
@@ -569,7 +569,7 @@ impl GpuState {
     ) {
         // create 1 root parameter for graphics
         let frag_shader_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             ..mem::zeroed()
         };
@@ -644,7 +644,7 @@ impl GpuState {
         println!("compiling vertex shader code...");
         let graphics_vertex_shader_blob = dx12::ShaderByteCode::compile(
             shader_code,
-            String::from("vs_5_0"),
+            String::from("vs_5_1"),
             vertex_entry,
             shader_compile_flags,
         );
@@ -654,7 +654,7 @@ impl GpuState {
         println!("compiling fragment shader code...");
         let graphics_fragment_shader_blob = dx12::ShaderByteCode::compile(
             shader_code,
-            String::from("ps_5_0"),
+            String::from("ps_5_1"),
             fragment_entry,
             shader_compile_flags,
         );

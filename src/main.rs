@@ -19,11 +19,10 @@ fn main() {
         let shader_code =
 "#define BLOCK_SIZE 256
 
-RWTexture2D<float4> canvas;
-
+RWTexture2D<float4> cs_canvas; // must always be bound as UAV
 [numthreads(16, 16, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
-    float4 color = {0.0f, 0.0f, 1.0f, 1.0f};
+    float4 cs_canvas = {0.0f, 0.0f, 1.0f, 1.0f};
     canvas[DTid.xy] = color;
 }
 
@@ -32,12 +31,11 @@ float4 VSMain(float4 position: POSITION) : SV_Position
     return position;
 }
 
+Texture2D<float4> ps_canvas; // so that we can bind as SRV rather than UAV
 float4 PSMain(float4 position: SV_Position) : SV_TARGET
 {
     uint2 pos = position.xy;
-    return canvas[pos.xy];
-    //float4 color = {0.0f, 1.0f, 0.0f, 1.0f};
-    //return color;
+    return ps_canvas[pos.xy];
 }
 "
         .as_bytes();
