@@ -378,7 +378,6 @@ impl GpuState {
             VisibleNodeMask: 0,
         };
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
-        let compute_resource_heap_flags = d3d12::D3D12_HEAP_FLAG_NONE;
         let compute_resource_desc = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
             //TODO: what alignment should be chosen?
@@ -395,7 +394,7 @@ impl GpuState {
             },
             //essentially we're letting the adapter decide the layout
             Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
-            Flags: compute_resource_heap_flags,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
         };
         let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
@@ -451,6 +450,7 @@ impl GpuState {
             device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
         // create frame resources
+        let mut ct_cpu_descriptor = compute_target_descriptor_heap.get_cpu_descriptor_handle_for_heap_start();
         let mut rt_cpu_descriptor = rtv_descriptor_heap.get_cpu_descriptor_handle_for_heap_start();
         // create render target and render target view for each frame
         let mut compute_targets: Vec<dx12::Resource> = Vec::new();
@@ -461,7 +461,7 @@ impl GpuState {
         for ix in 0..FRAME_COUNT {
             let compute_target_resource = device.create_committed_resource(
                 &compute_heap_properties,
-                compute_resource_heap_flags,
+                d3d12::D3D12_HEAP_FLAG_NONE,
                 &compute_resource_desc,
                 d3d12::D3D12_RESOURCE_STATE_COMMON,
                 ptr::null(),
@@ -474,6 +474,9 @@ impl GpuState {
                 rt_cpu_descriptor,
             );
 
+            device.create_unordered_access_view(compute_target_resource.clone(), ct_cpu_descriptor);
+
+            ct_cpu_descriptor.ptr += compute_target_descriptor_size as usize;
             rt_cpu_descriptor.ptr += rtv_descriptor_size as usize;
 
             compute_targets.push(compute_target_resource.clone());
