@@ -34,6 +34,8 @@ float4 VSMain(float4 position: POSITION) : SV_Position
 float4 PSMain(float4 position: SV_Position) : SV_TARGET
 {
     uint2 pos = position.xy;
+    //float4 color = {frac(position.y), frac(position.y), frac(position.y), 1.0f};
+    //return color;
     return canvas[pos.xy];
 }
 "
