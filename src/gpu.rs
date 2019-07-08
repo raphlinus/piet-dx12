@@ -50,16 +50,15 @@ pub struct GpuState {
     scissor_rect: d3d12::D3D12_RECT,
     swapchain: dx12::SwapChain3,
     device: dx12::Device,
-    render_targets: Vec<dx12::Resource>,
-    compute_targets: Vec<dx12::Resource>,
     command_allocators: Vec<dx12::CommandAllocator>,
     command_queue: dx12::CommandQueue,
     compute_root_signature: dx12::RootSignature,
+    compute_target_descriptor_heap: dx12::DescriptorHeap,
+    compute_target: dx12::Resource,
     graphics_root_signature: dx12::RootSignature,
     rtv_descriptor_heap: dx12::DescriptorHeap,
-    compute_target_descriptor_heap: dx12::DescriptorHeap,
-    compute_target_descriptor_size: u32,
     rtv_descriptor_size: u32,
+    render_targets: Vec<dx12::Resource>,
     graphics_pipeline_state: dx12::PipelineState,
     compute_pipeline_state: dx12::PipelineState,
     command_list: dx12::GraphicsCommandList,
@@ -120,13 +119,12 @@ impl GpuState {
         let (
             swapchain,
             device,
-            compute_targets,
+            compute_target,
             render_targets,
             command_allocators,
             command_queue,
             compute_target_descriptor_heap,
             rtv_descriptor_heap,
-            compute_target_descriptor_size,
             rtv_descriptor_size,
             fence,
         ) = GpuState::create_pipeline_dependencies(width, height, wnd);
@@ -158,7 +156,7 @@ impl GpuState {
             scissor_rect,
             swapchain,
             device,
-            compute_targets,
+            compute_target,
             render_targets,
             command_allocators,
             command_queue,
@@ -169,7 +167,6 @@ impl GpuState {
             compute_pipeline_state,
             graphics_pipeline_state,
             command_list,
-            compute_target_descriptor_size,
             rtv_descriptor_size,
             frame_index: 0,
             fence_event,
@@ -203,12 +200,11 @@ impl GpuState {
             .set_compute_root_signature(self.compute_root_signature.clone());
         self.command_list.set_descriptor_heaps(vec![self.compute_target_descriptor_heap.clone()]);
         let mut ct_descriptor = self.compute_target_descriptor_heap.get_gpu_descriptor_handle_for_heap_start();
-        ct_descriptor.ptr += ((self.compute_target_descriptor_size as usize) * self.frame_index) as u64;
         self.command_list.set_compute_root_descriptor_table(0, ct_descriptor);
         self.command_list.dispatch(self.num_dispatch_threadgroups_x, self.num_dispatch_threadgroups_y, 1);
 
         // need to ensure all writes to resource are complete before any reads are done
-        let synchronize_uav = dx12::create_uav_resource_barrier(self.compute_targets[self.frame_index].0.as_raw());
+        let synchronize_uav = dx12::create_uav_resource_barrier(self.compute_target.0.as_raw());
         self.command_list.set_resource_barrier(vec![synchronize_uav]);
 
         // graphics pipeline call
@@ -331,13 +327,12 @@ impl GpuState {
     ) -> (
         dx12::SwapChain3,
         dx12::Device,
-        Vec<dx12::Resource>,
+        dx12::Resource,
         Vec<dx12::Resource>,
         Vec<dx12::CommandAllocator>,
         dx12::CommandQueue,
         dx12::DescriptorHeap,
         dx12::DescriptorHeap,
-        u32,
         u32,
         dx12::Fence,
     ) {
@@ -356,12 +351,11 @@ impl GpuState {
             }
         };
 
-        //TODO: command list type okay?
         let list_type = d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT;
         let command_queue =
             device.create_command_queue(list_type, 0, d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE, 0);
 
-        //create compute resource descriptions
+        //create compute resource
         let compute_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
             Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
@@ -394,15 +388,23 @@ impl GpuState {
         let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
 
-        // create compute descriptor heap
         let ct_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: FRAME_COUNT,
+            NumDescriptors: 1,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
         let compute_target_descriptor_heap = device.create_descriptor_heap(&ct_descriptor_heap_desc);
-        let compute_target_descriptor_size = device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        // create render target and render target view for each frame
+        let mut compute_target = device.create_committed_resource(
+            &compute_heap_properties,
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &compute_resource_desc,
+            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            ptr::null(),
+        );
+        device.create_unordered_access_view(compute_target.clone(), compute_target_descriptor_heap.get_cpu_descriptor_handle_for_heap_start());
 
         // create swapchain
         let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
@@ -444,23 +446,13 @@ impl GpuState {
         let rtv_descriptor_size =
             device.get_descriptor_increment_size(d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-        // create frame resources
-        let mut ct_cpu_descriptor = compute_target_descriptor_heap.get_cpu_descriptor_handle_for_heap_start();
+
         let mut rt_cpu_descriptor = rtv_descriptor_heap.get_cpu_descriptor_handle_for_heap_start();
-        // create render target and render target view for each frame
-        let mut compute_targets: Vec<dx12::Resource> = Vec::new();
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
 
         let mut command_allocators: Vec<dx12::CommandAllocator> = Vec::new();
 
         for ix in 0..FRAME_COUNT {
-            let compute_target_resource = device.create_committed_resource(
-                &compute_heap_properties,
-                d3d12::D3D12_HEAP_FLAG_NONE,
-                &compute_resource_desc,
-                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                ptr::null(),
-            );
             let render_target_resource = swap_chain3.get_buffer(ix);
 
             device.create_render_target_view(
@@ -469,12 +461,8 @@ impl GpuState {
                 rt_cpu_descriptor,
             );
 
-            device.create_unordered_access_view(compute_target_resource.clone(), ct_cpu_descriptor);
-
-            ct_cpu_descriptor.ptr += compute_target_descriptor_size as usize;
             rt_cpu_descriptor.ptr += rtv_descriptor_size as usize;
 
-            compute_targets.push(compute_target_resource.clone());
             render_targets.push(render_target_resource.clone());
 
             command_allocators.push(device.create_command_allocator(list_type));
@@ -485,13 +473,12 @@ impl GpuState {
         (
             swap_chain3,
             device,
-            compute_targets,
+            compute_target,
             render_targets,
             command_allocators,
             command_queue,
             compute_target_descriptor_heap,
             rtv_descriptor_heap,
-            compute_target_descriptor_size,
             rtv_descriptor_size,
             fence,
         )
