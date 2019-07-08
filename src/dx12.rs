@@ -712,10 +712,9 @@ impl GraphicsCommandList {
 
     pub unsafe fn set_resource_barrier(
         &self,
-        num_barriers: u32,
-        resource_barriers: *const d3d12::D3D12_RESOURCE_BARRIER,
+        resource_barriers: Vec<d3d12::D3D12_RESOURCE_BARRIER>,
     ) {
-        self.0.ResourceBarrier(num_barriers, resource_barriers);
+        self.0.ResourceBarrier(resource_barriers.len() as u32, (&resource_barriers).as_ptr());
     }
 
     pub unsafe fn set_viewport(&self, viewport: &d3d12::D3D12_VIEWPORT) {
@@ -852,6 +851,21 @@ pub fn default_blend_desc() -> d3d12::D3D12_BLEND_DESC {
             default_render_target_blend_desc(),
         ],
     }
+}
+
+pub unsafe fn create_uav_resource_barrier(
+    resource: *mut d3d12::ID3D12Resource,
+) -> d3d12::D3D12_RESOURCE_BARRIER {
+    let uav = d3d12::D3D12_RESOURCE_UAV_BARRIER {
+        pResource: resource,
+    };
+
+    let mut resource_barrier: d3d12::D3D12_RESOURCE_BARRIER = mem::zeroed();
+    resource_barrier.Type = d3d12::D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    resource_barrier.Flags = d3d12::D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    *resource_barrier.u.UAV_mut() = uav;
+
+    resource_barrier
 }
 
 pub unsafe fn create_transition_resource_barrier(

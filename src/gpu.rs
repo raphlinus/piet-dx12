@@ -207,7 +207,9 @@ impl GpuState {
         self.command_list.set_compute_root_descriptor_table(0, ct_descriptor);
         self.command_list.dispatch(self.num_dispatch_threadgroups_x, self.num_dispatch_threadgroups_y, 1);
 
-        // need to transition resource between compute and graphics?
+        // need to ensure all writes to resource are complete before any reads are done
+        let synchronize_uav = dx12::create_uav_resource_barrier(self.compute_targets[self.frame_index].0.as_raw());
+        self.command_list.set_resource_barrier(vec![synchronize_uav]);
 
         // graphics pipeline call
         println!("      setting command list pipeline state to graphics...");
@@ -228,14 +230,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
         );
         println!("      command list: set pre-draw resource barrier...");
-        self.command_list.set_resource_barrier(
-            1,
-            [
-                //transition_intermediate_to_pixel_shader_resource,
-                transition_render_target_from_present,
-            ]
-                .as_ptr(),
-        );
+        self.command_list.set_resource_barrier(vec![transition_render_target_from_present]);
         let mut rt_descriptor = self.rtv_descriptor_heap.get_cpu_descriptor_handle_for_heap_start();
         let rt_descriptor_size = self
             .device
@@ -261,7 +256,7 @@ impl GpuState {
         );
         println!("      command list: set post-draw resource barrier...");
         self.command_list
-            .set_resource_barrier(1, [transition_render_target_to_present].as_ptr());
+            .set_resource_barrier(vec![transition_render_target_to_present]);
 
         println!("      command list: close...");
         self.command_list.close();
@@ -463,7 +458,7 @@ impl GpuState {
                 &compute_heap_properties,
                 d3d12::D3D12_HEAP_FLAG_NONE,
                 &compute_resource_desc,
-                d3d12::D3D12_RESOURCE_STATE_COMMON,
+                d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                 ptr::null(),
             );
             let render_target_resource = swap_chain3.get_buffer(ix);
