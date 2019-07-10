@@ -46,7 +46,7 @@ fn output_shader_code(tile_size: u32) -> String {
     let step0 = String::from(
         "#define BLOCK_SIZE ~TILE_SIZE_SQUARED~
 
-cbuffer Constants
+cbuffer Constants : register(b0)
 {
 	uint num_circles;
 };
@@ -58,9 +58,9 @@ struct Circle
     float4 color;
     float pad;
 };
-StructuredBuffer <Circle> circle_buffer;
+StructuredBuffer <Circle> circle_buffer : register(t0);
 
-RWTexture2D<float4> canvas;
+RWTexture2D<float4> canvas : register(u0);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius, float err) {
     float d = distance(pixel_pos, center_pos);
@@ -332,9 +332,9 @@ impl GpuState {
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_graphics_root_descriptor_table(
-            2,
+            0,
             self.compute_descriptor_heap
-                .get_gpu_descriptor_handle_at_offset(0),
+                .get_gpu_descriptor_handle_at_offset(2),
         );
         self.command_list.set_viewport(&self.viewport);
         println!("      command list: set scissor rect...");
@@ -527,7 +527,7 @@ impl GpuState {
             .upload_data_to_resource(1, &[circles.len()].as_ptr());
         device.create_constant_buffer_view(
             num_circles_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(0),
             padded_size_in_bytes as u32,
         );
 
@@ -576,8 +576,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        circle_buffer.upload_data_to_resource(circle_buffer_size, (&circles).as_ptr());
-        println!("creating structured buffer shader resource view 0...");
+        circle_buffer.upload_data_to_resource(circles.len(), (&circles).as_ptr());
         device.create_structured_buffer_shader_resource_view(
             circle_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
@@ -611,7 +610,7 @@ impl GpuState {
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
         let compute_target_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
             //TODO: what should MemoryPoolPreference flag be?
             MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
@@ -670,9 +669,7 @@ impl GpuState {
             NodeMask: 0,
         };
         let rtv_descriptor_heap = device.create_descriptor_heap(&rtv_descriptor_heap_desc);
-
-        let mut rt_cpu_descriptor = rtv_descriptor_heap.get_cpu_descriptor_handle_at_offset(0);
-
+        
         println!("creating render target views and command allocators for frames...");
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
         let mut command_allocators: Vec<dx12::CommandAllocator> = Vec::new();
@@ -716,30 +713,38 @@ impl GpuState {
     ) -> (dx12::RootSignature, dx12::PipelineState) {
         println!("creating compute root signature...");
         // compute root signature
-        let compute_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 2,
+        let compute_cbv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+            NumDescriptors: 1,
             ..mem::zeroed()
         };
-        let compute_uav_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
-            NumDescriptorRanges: 1,
-            pDescriptorRanges: &compute_uav_descriptor_range as *const _,
+        let compute_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            ..mem::zeroed()
+        };
+        let compute_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            ..mem::zeroed()
+        };
+        let compute_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: 3,
+            pDescriptorRanges: [compute_cbv_descriptor_range, compute_srv_descriptor_range, compute_uav_descriptor_range].as_ptr() as *const _,
         };
         let mut compute_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
             ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
             ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
             ..mem::zeroed()
         };
-        *compute_root_parameter.u.DescriptorTable_mut() = compute_uav_table;
-
+        *compute_root_parameter.u.DescriptorTable_mut() = compute_descriptor_table;
         let compute_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 2,
+            NumParameters: 1,
             pParameters: &compute_root_parameter as *const _,
             NumStaticSamplers: 0,
             pStaticSamplers: ptr::null(),
             Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
         };
-
         let blob = dx12::RootSignature::serialize_description(
             &compute_root_signature_desc,
             d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
@@ -788,14 +793,14 @@ impl GpuState {
     ) {
         println!("creating graphics root signature...");
         // create graphics root signature
-        let frag_shader_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        let frag_shader_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             ..mem::zeroed()
         };
         let frag_shader_srv_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
             NumDescriptorRanges: 1,
-            pDescriptorRanges: &frag_shader_srv_descriptor_range as *const _,
+            pDescriptorRanges: &frag_shader_uav_descriptor_range as *const _,
         };
         let mut graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
             ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
@@ -803,7 +808,6 @@ impl GpuState {
             ..mem::zeroed()
         };
         *graphics_root_parameter.u.DescriptorTable_mut() = frag_shader_srv_table;
-
         let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
             NumParameters: 1,
             pParameters: &graphics_root_parameter as *const _,
@@ -811,7 +815,6 @@ impl GpuState {
             pStaticSamplers: ptr::null(),
             Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
         };
-
         // serialize root signature description and create graphics root signature
         let blob = dx12::RootSignature::serialize_description(
             &graphics_root_signature_desc,
@@ -855,7 +858,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        vertex_buffer.upload_data_to_resource(vertex_buffer_size, vertices.as_ptr());
+        vertex_buffer.upload_data_to_resource(vertices.len(), vertices.as_ptr());
         let vertex_buffer_view = d3d12::D3D12_VERTEX_BUFFER_VIEW {
             BufferLocation: vertex_buffer.get_gpu_virtual_address(),
             SizeInBytes: vertex_buffer_size as u32,
