@@ -477,13 +477,13 @@ impl GpuState {
 
         println!("creating compute resource descriptor heap...");
         // create compute resource descriptor heap
-        let compute_descriptor_heap = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+        let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
             NumDescriptors: 3,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
-        let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap);
+        let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
         // create num_circles buffer
         println!("creating num_circles buffer resource...");
@@ -669,7 +669,7 @@ impl GpuState {
             NodeMask: 0,
         };
         let rtv_descriptor_heap = device.create_descriptor_heap(&rtv_descriptor_heap_desc);
-        
+
         println!("creating render target views and command allocators for frames...");
         let mut render_targets: Vec<dx12::Resource> = Vec::new();
         let mut command_allocators: Vec<dx12::CommandAllocator> = Vec::new();
