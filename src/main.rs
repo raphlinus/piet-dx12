@@ -6,47 +6,21 @@
 pub mod dx12;
 pub mod error;
 pub mod gpu;
+pub mod scene;
 pub mod window;
 
 fn main() {
     unsafe {
-        //env_logger::init();
-
         println!("creating window...");
         let mut wnd =
             window::Window::new(window::win32_string("test"), window::win32_string("test"));
 
-        let shader_code =
-"#define BLOCK_SIZE 256
-
-RWTexture2D<float4> canvas;
-[numthreads(16, 16, 1)]
-void CSMain(uint3 DTid : SV_DispatchThreadID) {
-    float4 color = {0.0f, 0.0f, 1.0f, 1.0f};
-    canvas[DTid.xy] = color;
-}
-
-float4 VSMain(float4 position: POSITION) : SV_Position
-{
-    return position;
-}
-
-float4 PSMain(float4 position: SV_Position) : SV_TARGET
-{
-    uint2 pos = position.xy;
-    //float4 color = {frac(position.y), frac(position.y), frac(position.y), 1.0f};
-    //return color;
-    return canvas[pos.xy];
-}
-"
-        .as_bytes();
-
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
-            shader_code,
             String::from("CSMain"),
             String::from("VSMain"),
             String::from("PSMain"),
+            16,
         );
 
         println!("beginning loop...");

@@ -47,7 +47,11 @@ pub type CpuDescriptor = d3d12::D3D12_CPU_DESCRIPTOR_HANDLE;
 pub type GpuDescriptor = d3d12::D3D12_GPU_DESCRIPTOR_HANDLE;
 
 #[derive(Clone)]
-pub struct DescriptorHeap(pub ComPtr<d3d12::ID3D12DescriptorHeap>);
+pub struct DescriptorHeap {
+    pub heap_type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE,
+    pub increment_size: u32,
+    pub heap: ComPtr<d3d12::ID3D12DescriptorHeap>,
+}
 
 pub type TextureAddressMode = [d3d12::D3D12_TEXTURE_ADDRESS_MODE; 3];
 
@@ -353,7 +357,11 @@ impl Device {
         ))
         .expect("device could not create descriptor heap");
 
-        DescriptorHeap(ComPtr::from_raw(heap))
+        DescriptorHeap {
+            heap_type: heap_description.Type,
+            increment_size: self.get_descriptor_increment_size(heap_description.Type),
+            heap: ComPtr::from_raw(heap),
+        }
     }
 
     pub unsafe fn get_descriptor_increment_size(
@@ -474,6 +482,44 @@ impl Device {
         )
     }
 
+    pub unsafe fn create_constant_buffer_view(
+        &self,
+        resource: Resource,
+        descriptor: CpuDescriptor,
+        size_in_bytes: u32,
+    ) {
+        let mut cbv_desc = d3d12::D3D12_CONSTANT_BUFFER_VIEW_DESC {
+            BufferLocation: resource.get_gpu_virtual_address(),
+            SizeInBytes: size_in_bytes,
+        };
+        self.0
+            .CreateConstantBufferView(&cbv_desc as *const _, descriptor);
+    }
+
+    pub unsafe fn create_structured_buffer_shader_resource_view(
+        &self,
+        resource: Resource,
+        descriptor: CpuDescriptor,
+        first_element: u64,
+        num_elements: u32,
+        structure_byte_stride: u32,
+    ) {
+        let mut srv_desc = d3d12::D3D12_SHADER_RESOURCE_VIEW_DESC {
+            Format: dxgiformat::DXGI_FORMAT_UNKNOWN,
+            ViewDimension: d3d12::D3D12_SRV_DIMENSION_BUFFER,
+            Shader4ComponentMapping: 0x1688,
+            ..mem::zeroed()
+        };
+        *srv_desc.u.Buffer_mut() = d3d12::D3D12_BUFFER_SRV {
+            FirstElement: first_element,
+            NumElements: num_elements,
+            StructureByteStride: structure_byte_stride,
+            Flags: d3d12::D3D12_BUFFER_SRV_FLAG_NONE,
+        };
+        self.0
+            .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
+    }
+
     pub unsafe fn create_render_target_view(
         &self,
         resource: Resource,
@@ -530,12 +576,26 @@ impl CommandAllocator {
 }
 
 impl DescriptorHeap {
-    pub unsafe fn get_cpu_descriptor_handle_for_heap_start(&self) -> CpuDescriptor {
-        self.0.GetCPUDescriptorHandleForHeapStart()
+    unsafe fn get_cpu_descriptor_handle_for_heap_start(&self) -> CpuDescriptor {
+        self.heap.GetCPUDescriptorHandleForHeapStart()
     }
 
-    pub unsafe fn get_gpu_descriptor_handle_for_heap_start(&self) -> GpuDescriptor {
-        self.0.GetGPUDescriptorHandleForHeapStart()
+    unsafe fn get_gpu_descriptor_handle_for_heap_start(&self) -> GpuDescriptor {
+        self.heap.GetGPUDescriptorHandleForHeapStart()
+    }
+
+    pub unsafe fn get_cpu_descriptor_handle_at_offset(&self, offset: u32) -> CpuDescriptor {
+        let mut descriptor = self.get_cpu_descriptor_handle_for_heap_start();
+        descriptor.ptr += (offset as usize) * (self.increment_size as usize);
+
+        descriptor
+    }
+
+    pub unsafe fn get_gpu_descriptor_handle_at_offset(&self, offset: u32) -> GpuDescriptor {
+        let mut descriptor = self.get_gpu_descriptor_handle_for_heap_start();
+        descriptor.ptr += (offset as u64) * (self.increment_size as u64);
+
+        descriptor
     }
 }
 
@@ -714,7 +774,10 @@ impl GraphicsCommandList {
         &self,
         resource_barriers: Vec<d3d12::D3D12_RESOURCE_BARRIER>,
     ) {
-        self.0.ResourceBarrier(resource_barriers.len() as u32, (&resource_barriers).as_ptr());
+        self.0.ResourceBarrier(
+            resource_barriers.len() as u32,
+            (&resource_barriers).as_ptr(),
+        );
     }
 
     pub unsafe fn set_viewport(&self, viewport: &d3d12::D3D12_VIEWPORT) {
@@ -753,8 +816,13 @@ impl GraphicsCommandList {
             .SetComputeRootUnorderedAccessView(root_parameter_index, buffer_location);
     }
 
-    pub unsafe fn set_compute_root_descriptor_table(&self, root_parameter_index: u32, base_descriptor: d3d12::D3D12_GPU_DESCRIPTOR_HANDLE) {
-        self.0.SetComputeRootDescriptorTable(root_parameter_index, base_descriptor);
+    pub unsafe fn set_compute_root_descriptor_table(
+        &self,
+        root_parameter_index: u32,
+        base_descriptor: d3d12::D3D12_GPU_DESCRIPTOR_HANDLE,
+    ) {
+        self.0
+            .SetComputeRootDescriptorTable(root_parameter_index, base_descriptor);
     }
 
     pub unsafe fn set_graphics_root_shader_resource_view(
@@ -766,8 +834,13 @@ impl GraphicsCommandList {
             .SetGraphicsRootShaderResourceView(root_parameter_index, buffer_location);
     }
 
-    pub unsafe fn set_graphics_root_descriptor_table(&self, root_parameter_index: u32, base_descriptor: d3d12::D3D12_GPU_DESCRIPTOR_HANDLE) {
-        self.0.SetGraphicsRootDescriptorTable(root_parameter_index, base_descriptor);
+    pub unsafe fn set_graphics_root_descriptor_table(
+        &self,
+        root_parameter_index: u32,
+        base_descriptor: d3d12::D3D12_GPU_DESCRIPTOR_HANDLE,
+    ) {
+        self.0
+            .SetGraphicsRootDescriptorTable(root_parameter_index, base_descriptor);
     }
 
     pub unsafe fn set_render_target(
@@ -813,8 +886,12 @@ impl GraphicsCommandList {
     }
 
     pub unsafe fn set_descriptor_heaps(&self, descriptor_heaps: Vec<DescriptorHeap>) {
-        let descriptor_heap_pointers: Vec<*mut d3d12::ID3D12DescriptorHeap> = descriptor_heaps.iter().map(|dh| dh.0.as_raw()).collect();
-        self.0.SetDescriptorHeaps(descriptor_heap_pointers.len() as u32, (&descriptor_heap_pointers).as_ptr() as *mut _);
+        let descriptor_heap_pointers: Vec<*mut d3d12::ID3D12DescriptorHeap> =
+            descriptor_heaps.iter().map(|dh| dh.heap.as_raw()).collect();
+        self.0.SetDescriptorHeaps(
+            descriptor_heap_pointers.len() as u32,
+            (&descriptor_heap_pointers).as_ptr() as *mut _,
+        );
     }
 }
 
@@ -898,14 +975,12 @@ pub unsafe fn enable_debug_layer() {
 
     (*debug_controller).EnableDebugLayer();
 
-
     let mut queue = ptr::null_mut();
-    let hr =
-        dxgi1_3::DXGIGetDebugInterface1(
-            0,
-            &dxgidebug::IDXGIInfoQueue::uuidof(),
-            &mut queue as *mut _ as *mut _,
-        );
+    let hr = dxgi1_3::DXGIGetDebugInterface1(
+        0,
+        &dxgidebug::IDXGIInfoQueue::uuidof(),
+        &mut queue as *mut _ as *mut _,
+    );
 
     if winerror::SUCCEEDED(hr) {
         (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
