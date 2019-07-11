@@ -66,7 +66,6 @@ cbuffer Constants : register(b0)
 struct Circle
 {
     float radius;
-    float pad;
     float2 center;
     float4 color;
 };
