@@ -68,7 +68,6 @@ struct Circle
     float radius;
     float2 center;
     float4 color;
-    float pad;
 };
 StructuredBuffer <Circle> circle_buffer : register(t0);
 
@@ -76,7 +75,7 @@ RWTexture2D<float4> canvas : register(u0);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius, float err) {
     float d = distance(pixel_pos, center_pos);
-    float alpha = clamp(d, 0.0f, 1.0f);
+    float alpha = clamp(radius - d, 0.0f, 1.0f);
     return alpha;
 }
 
@@ -87,22 +86,26 @@ float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, Circle circle) {
     return pixel_color;
 }
 
+//float4 blend_pd_over(float4 bg, float4 fg) {
+//    float fga = fg[3];
+//    float bga = bg[3];
+//    float fgax = 1.0f - fga;
+//    float bgax = 1.0f - bga;
+//    float x = bga*fgax;
+//
+//    float denominator = fga + bga*fgax;
+//
+//    float r = fg[0]*fga + bg[0]*x;
+//    float g = fg[1]*fga + bg[1]*x;
+//    float b = fg[2]*fga + bg[2]*x;
+//    float a = fga*fga + bga*x;
+//
+//    float4 result = {r, g, b, a};
+//    return result;
+//}
+
 float4 blend_pd_over(float4 bg, float4 fg) {
-    float fga = fg[3];
-    float bga = bg[3];
-    float fgax = 1.0f - fga;
-    float bgax = 1.0f - bga;
-    float x = bga*fgax;
-
-    float denominator = fga + bga*fgax;
-
-    float r = fg[0]*fga + bg[0]*x;
-    float g = fg[1]*fga + bg[1]*x;
-    float b = fg[2]*fga + bg[2]*x;
-    float a = fga*fga + bga*x;
-
-    float4 result = {r, g, b, a};
-    return result;
+    return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
