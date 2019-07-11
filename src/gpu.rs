@@ -716,16 +716,19 @@ impl GpuState {
         let compute_cbv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: 0,
             ..mem::zeroed()
         };
         let compute_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: 1,
             ..mem::zeroed()
         };
         let compute_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: 2,
             ..mem::zeroed()
         };
         let compute_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
@@ -796,6 +799,7 @@ impl GpuState {
         let frag_shader_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: 0,
             ..mem::zeroed()
         };
         let frag_shader_srv_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
