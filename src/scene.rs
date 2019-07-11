@@ -5,6 +5,7 @@ use rand::Rng;
 #[repr(C)]
 pub struct Circle {
     radius: f32,
+    pad: f32,
     center: [f32; 2],
     color: [f32; 4],
 }
@@ -21,6 +22,7 @@ pub fn create_random_scene(screen_width: u32, screen_height: u32, num_circles: u
                 rng.gen_range(0.0, screen_width as f32),
                 rng.gen_range(0.0, screen_height as f32),
             ],
+            pad: 0.0,
             color: [rng.gen(), rng.gen(), rng.gen(), rng.gen()],
         })
     }
