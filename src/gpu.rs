@@ -724,9 +724,10 @@ impl GpuState {
             OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
             ..mem::zeroed()
         };
+        let descriptor_ranges = [compute_cbv_descriptor_range, compute_srv_descriptor_range, compute_uav_descriptor_range];
         let compute_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
             NumDescriptorRanges: 3,
-            pDescriptorRanges: [compute_cbv_descriptor_range, compute_srv_descriptor_range, compute_uav_descriptor_range].as_ptr() as *const _,
+            pDescriptorRanges: descriptor_ranges.as_ptr() as *const _,
         };
         let mut compute_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
             ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
