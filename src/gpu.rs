@@ -13,6 +13,18 @@ pub type VertexCoordinates = [f32; 3];
 pub type VertexColor = [f32; 4];
 pub type Vertex = VertexCoordinates;
 
+unsafe fn store_u32_in_256_bytes(x: u32) -> [u8; 256] {
+    let mut result: [u8; 256] = [0; 256];
+    let x_in_bytes: [u8; 4] = mem::transmute(x);
+
+    for n in 0..4 {
+        result[0] = x_in_bytes[3 - n];
+    }
+
+    result
+}
+
+
 pub struct Quad {
     ox: f32,
     oy: f32,
@@ -64,17 +76,8 @@ RWTexture2D<float4> canvas : register(u0);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius, float err) {
     float d = distance(pixel_pos, center_pos);
-
-    if (d > (1.0f + err)*radius) {
-        return 0.0f;
-    }
-
-    if (d < (1.0f - err)*radius) {
-        return 1.0f;
-    }
-
-    // linear interpolation
-    return 1.0f - (d - (1.0f - err)*radius)/(2*err*radius);
+    float alpha = clamp(d, 0.0f, 1.0f);
+    return alpha;
 }
 
 float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, Circle circle) {
@@ -105,15 +108,19 @@ float4 blend_pd_over(float4 bg, float4 fg) {
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
-    float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
-
+//    float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
+//
     uint2 pixel_pos = DTid.xy;
+//
+//    for (uint i = 0; i < num_circles; i++) {
+//        Circle c = circle_buffer.Load(i);
+//
+//        float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, c);
+//        bg = blend_pd_over(bg, fg);
+//    }
 
-    for (uint i = 0; i < num_circles; i++) {
-        Circle c = circle_buffer.Load(i);
-
-        float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, c);
-        bg = blend_pd_over(bg, fg);
+    if ((1 << ((pixel_pos.x >> 3) & 31)) & num_circles) {
+        bg = float4(0.0, 1.0, 0.0, 1.0);
     }
 
     canvas[DTid.xy] = bg;
@@ -184,7 +191,7 @@ impl GpuState {
 
         let width = wnd.get_width();
         let height = wnd.get_height();
-        let circles = scene::create_random_scene(width, height);
+        let circles = scene::create_random_scene(width, height, 1000);
 
         let f_tile_size = tile_size as f32;
         let f_width = width as f32;
@@ -490,7 +497,7 @@ impl GpuState {
         let num_circles_buffer_stride = mem::size_of::<u32>();
         let num_circles_buffer_size = num_circles_buffer_stride * 1;
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
-        let padded_size_in_bytes = (num_circles_buffer_stride + 255) & !255;
+        let padded_size_in_bytes: u64 = 256;
         let num_circles_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
             Width: padded_size_in_bytes as u64,
@@ -524,7 +531,7 @@ impl GpuState {
             ptr::null(),
         );
         num_circles_buffer
-            .upload_data_to_resource(1, &[circles.len()].as_ptr());
+            .upload_data_to_resource(256, store_u32_in_256_bytes(circles.len() as u32).as_ptr());
         device.create_constant_buffer_view(
             num_circles_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(0),
@@ -716,19 +723,19 @@ impl GpuState {
         let compute_cbv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 0,
+            OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
             ..mem::zeroed()
         };
         let compute_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 1,
+            OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
             ..mem::zeroed()
         };
         let compute_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 2,
+            OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
             ..mem::zeroed()
         };
         let compute_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
