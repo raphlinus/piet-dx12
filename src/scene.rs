@@ -2,6 +2,7 @@ extern crate rand;
 
 use rand::Rng;
 
+#[repr(C)]
 pub struct Circle {
     radius: f32,
     center: [f32; 2],

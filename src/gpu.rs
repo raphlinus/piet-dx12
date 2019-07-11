@@ -108,20 +108,20 @@ float4 blend_pd_over(float4 bg, float4 fg) {
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
-//    float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
-//
-    uint2 pixel_pos = DTid.xy;
-//
-//    for (uint i = 0; i < num_circles; i++) {
-//        Circle c = circle_buffer.Load(i);
-//
-//        float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, c);
-//        bg = blend_pd_over(bg, fg);
-//    }
+    float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
 
-    if ((1 << ((pixel_pos.x >> 3) & 31)) & num_circles) {
-        bg = float4(0.0, 1.0, 0.0, 1.0);
+    uint2 pixel_pos = DTid.xy;
+
+    for (uint i = 0; i < num_circles; i++) {
+        Circle c = circle_buffer.Load(i);
+
+        float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, c);
+        bg = blend_pd_over(bg, fg);
     }
+
+//    if ((1 << ((pixel_pos.x >> 3) & 31)) & num_circles) {
+//        bg = float4(0.0, 1.0, 0.0, 1.0);
+//    }
 
     canvas[DTid.xy] = bg;
 }
