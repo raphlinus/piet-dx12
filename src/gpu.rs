@@ -18,7 +18,7 @@ unsafe fn store_u32_in_256_bytes(x: u32) -> [u8; 256] {
     let x_in_bytes: [u8; 4] = mem::transmute(x);
 
     for n in 0..4 {
-        result[0] = x_in_bytes[3 - n];
+        result[n] = x_in_bytes[n];
     }
 
     result
