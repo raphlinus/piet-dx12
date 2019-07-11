@@ -66,9 +66,9 @@ cbuffer Constants : register(b0)
 struct Circle
 {
     float radius;
+    float pad;
     float2 center;
     float4 color;
-    float pad;
 };
 StructuredBuffer <Circle> circle_buffer : register(t0);
 
@@ -76,7 +76,7 @@ RWTexture2D<float4> canvas : register(u0);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius, float err) {
     float d = distance(pixel_pos, center_pos);
-    float alpha = clamp(d, 0.0f, 1.0f);
+    float alpha = clamp(radius - d, 0.0f, 1.0f);
     return alpha;
 }
 
@@ -88,29 +88,19 @@ float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, Circle circle) {
 }
 
 float4 blend_pd_over(float4 bg, float4 fg) {
-    float fga = fg[3];
-    float bga = bg[3];
-    float fgax = 1.0f - fga;
-    float bgax = 1.0f - bga;
-    float x = bga*fgax;
-
-    float denominator = fga + bga*fgax;
-
-    float r = fg[0]*fga + bg[0]*x;
-    float g = fg[1]*fga + bg[1]*x;
-    float b = fg[2]*fga + bg[2]*x;
-    float a = fga*fga + bga*x;
-
-    float4 result = {r, g, b, a};
-    return result;
+    return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
-    float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
+    float4 bg = {0.5f, 0.5f, 0.5f, 1.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
 
     uint2 pixel_pos = DTid.xy;
+
+    //if ((1 << ((pixel_pos.x >> 3) & 31)) & num_circles) {
+    //    bg = float4(0.0, 1.0, 0.0, 1.0);
+    //}
 
     for (uint i = 0; i < num_circles; i++) {
         Circle c = circle_buffer.Load(i);
@@ -119,9 +109,6 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
         bg = blend_pd_over(bg, fg);
     }
 
-//    if ((1 << ((pixel_pos.x >> 3) & 31)) & num_circles) {
-//        bg = float4(0.0, 1.0, 0.0, 1.0);
-//    }
 
     canvas[DTid.xy] = bg;
 }
@@ -531,7 +518,7 @@ impl GpuState {
             ptr::null(),
         );
         num_circles_buffer
-            .upload_data_to_resource(256, store_u32_in_256_bytes(circles.len() as u32).as_ptr());
+            .upload_data_to_resource(256, &(circles.len() as u32));
         device.create_constant_buffer_view(
             num_circles_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(0),
