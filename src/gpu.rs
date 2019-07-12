@@ -90,9 +90,31 @@ float4 blend_pd_over(float4 bg, float4 fg) {
     return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
+Circle calculate_circle_based_on_index(uint ix) {
+    float fix = ix;
+    float x_ix = floor(fix/100.0f);
+    float y_ix = floor((fix - 100.0f*x_ix)/10.0f);
+    float z_ix = fix - 100.0f*x_ix - 10.0f*y_ix;
+
+    float max_circle_radius = 1.25f*25.0f;
+    float min_circle_radius = 5.0f;
+    float box_size = 2.0f*max_circle_radius*1.2f;
+    float delta_radius = (max_circle_radius - min_circle_radius)/10.0f;
+
+    float base_x = 50.0f;
+    float base_y = 50.0f;
+
+    float radius = 5.0f + z_ix*delta_radius;
+    float2 center = {base_x + (x_ix - 0.5f)*box_size, base_y + (y_ix - 0.5f)*box_size};
+    float4 color = {1.0f, 0.0f, 0.0f, clamp(1.0f - (z_ix*0.1f), 0.0f, 1.0f)};
+    Circle c = {radius, center, color};
+
+    return c;
+}
+
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
-    float4 bg = {0.5f, 0.5f, 0.5f, 1.0f};
+    float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
 
     uint2 pixel_pos = DTid.xy;
@@ -102,8 +124,8 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
     //}
 
     for (uint i = 0; i < num_circles; i++) {
-        Circle c = circle_buffer.Load(i);
-
+        //Circle c = circle_buffer.Load(i);
+        Circle c = calculate_circle_based_on_index(i);
         float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, c);
         bg = blend_pd_over(bg, fg);
     }
