@@ -63,26 +63,23 @@ cbuffer Constants : register(b0)
 	uint num_circles;
 };
 
-struct Circle
-{
-    float radius;
-    float2 center;
-    float4 color;
-};
-StructuredBuffer <Circle> circle_buffer : register(t0);
+ByteAddressBuffer circle_bbox_buffer : register(t0);
+ByteAddressBuffer circle_color_buffer : register(t1);
 
-RWTexture2D<float4> canvas : register(u0);
+RWTexture2D<float4> canvas : register(u1);
 
-float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius, float err) {
+float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
     float d = distance(pixel_pos, center_pos);
     float alpha = clamp(radius - d, 0.0f, 1.0f);
     return alpha;
 }
 
-float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, Circle circle) {
-    float position_based_alpha = circle_shader(pixel_pos, circle.center, circle.radius, 2.0f);
+float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, float4 circle_color) {
+    uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5), lerp(circle_bbox[2], circle_bbox[3], 0.5)};
+    float radius = circle_bbox[1] - circle_bbox[2];
+    float position_based_alpha = circle_shader(pixel_pos, circle_center, radius);
 
-    float4 pixel_color = {circle.color[0], circle.color[1], circle.color[2], circle.color[3]*position_based_alpha};
+    float4 pixel_color = {circle_color.r, circle_color.g, circle_color.b, circle_color.a*position_based_alpha};
     return pixel_color;
 }
 
@@ -90,26 +87,79 @@ float4 blend_pd_over(float4 bg, float4 fg) {
     return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
-Circle calculate_circle_based_on_index(uint ix) {
-    float fix = ix;
-    float x_ix = floor(fix/100.0f);
-    float y_ix = floor((fix - 100.0f*x_ix)/10.0f);
-    float z_ix = fix - 100.0f*x_ix - 10.0f*y_ix;
+uint2 extract_ushort2_from_uint(uint input_value) {
+    // https://www.wolframalpha.com/input/?i=1111111111111111_2
+    uint right_mask = 65535;
+    uint left_mask = right_mask << 16;
 
-    float max_circle_radius = 1.25f*25.0f;
-    float min_circle_radius = 5.0f;
-    float box_size = 2.0f*max_circle_radius*1.2f;
-    float delta_radius = (max_circle_radius - min_circle_radius)/10.0f;
+    uint left_value = (left_mask & input_value) >> 16;
+    uint right_value = right_mask & input_value;
 
-    float base_x = 50.0f;
-    float base_y = 50.0f;
+    uint2 result = {left_value, right_value};
 
-    float radius = 5.0f + z_ix*delta_radius;
-    float2 center = {base_x + (x_ix - 0.5f)*box_size, base_y + (y_ix - 0.5f)*box_size};
-    float4 color = {1.0f, 0.0f, 0.0f, clamp(1.0f - (z_ix*0.1f), 0.0f, 1.0f)};
-    Circle c = {radius, center, color};
+    return result;
+}
 
-    return c;
+uint4 extract_u8s_from_uint(uint input_value) {
+    uint r_shift = 24;
+    uint g_shift = 16;
+    uint b_shift = 8;
+
+    uint mask_a = 255;
+    uint mask_b = mask_a << r_shift;
+    uint mask_g = mask_a << g_shift;
+    uint mask_r = mask_a << b_shift;
+
+    uint r = (mask_r & input_value) >> r_shift;
+    uint g = (mask_g & input_value) >> g_shift;
+    uint b = (mask_b & input_value) >> b_shift;
+    uint a = (mask_a & input_value);
+
+    uint4 result = {r, g, b, a};
+    return result;
+}
+
+uint4 load_bbox_at_index(uint ix) {
+    uint x_address = ix*8;
+    uint y_address = x_address + 4;
+
+    uint packed_bbox_x = circle_bbox_buffer.Load(x_address);
+    uint packed_bbox_y = circle_bbox_buffer.Load(y_address);
+
+    uint2 bbox_x = extract_ushort2_from_uint(packed_bbox_x);
+    uint2 bbox_y = extract_ushort2_from_uint(packed_bbox_y);
+
+    uint4 bbox = {bbox_x, bbox_y};
+
+    return bbox;
+}
+
+float4 load_color_at_index(uint ix) {
+    uint address = ix*4;
+    uint packed_color = circle_color_buffer.Load(address);
+    uint4 int_colors = extract_u8s_from_uint(packed_color);
+    float4 float_int_colors = int_colors;
+
+    float r = float_int_colors.r/255.0f;
+    float g = float_int_colors.g/255.0f;
+    float b = float_int_colors.b/255.0f;
+    float a = float_int_colors.a/255.0f;
+
+    float4 result = {r, g, b, a};
+    return result;
+}
+
+bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
+    uint px = pixel_pos.x;
+
+    if (bbox[0] <= px && px <= bbox[1]) {
+        uint py = pixel_pos.y;
+        if (bbox[2] <= py && py <= bbox[3]) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
@@ -119,17 +169,16 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 
     uint2 pixel_pos = DTid.xy;
 
-    //if ((1 << ((pixel_pos.x >> 3) & 31)) & num_circles) {
-    //    bg = float4(0.0, 1.0, 0.0, 1.0);
-    //}
-
     for (uint i = 0; i < num_circles; i++) {
-        //Circle c = circle_buffer.Load(i);
-        Circle c = calculate_circle_based_on_index(i);
-        float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, c);
-        bg = blend_pd_over(bg, fg);
-    }
+        uint4 bbox = load_bbox_at_index(i);
+        bool hit = is_pixel_in_bbox(pixel_pos, bbox);
 
+        if (hit) {
+            float4 color = load_color_at_index(i);
+            float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
+            bg = blend_pd_over(bg, fg);
+        }
+    }
 
     canvas[DTid.xy] = bg;
 }
