@@ -66,7 +66,7 @@ cbuffer Constants : register(b0)
 ByteAddressBuffer circle_bbox_buffer : register(t0);
 ByteAddressBuffer circle_color_buffer : register(t1);
 
-RWTexture2D<float4> canvas : register(u1);
+RWTexture2D<float4> canvas : register(u0);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
     float d = distance(pixel_pos, center_pos);
@@ -162,6 +162,179 @@ bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     return 0;
 }
 
+bool in_rect(uint2 pixel_pos, uint2 origin, uint2 size) {
+    uint px = pixel_pos.x;
+    uint py = pixel_pos.y;
+    uint left = origin.x;
+    uint right = origin.x + size.x;
+    uint top = origin.y - size.y;
+    uint bot = origin.y;
+
+    if (px < left || py > bot || py < top || px > right) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
+bool get_digit_code_0(uint digit) {
+	if (digit == 5 || digit == 6) {
+		return 0;
+	}
+
+	return 1;
+}
+
+bool get_digit_code_1(uint digit) {
+	if (digit == 2) {
+		return 0;
+	}
+
+	return 1;
+}
+
+bool get_digit_code_2(uint digit) {
+	if (digit == 1 || digit == 4 || digit == 7) {
+		return 0;
+	}
+
+	return 1;
+}
+
+bool get_digit_code_3(uint digit) {
+	if (digit == 0 || digit == 2 || digit == 6 || digit == 8) {
+		return 1;
+	}
+
+	return 0;
+}
+
+bool get_digit_code_4(uint digit) {
+	if (digit == 1 || digit == 2 || digit == 3 || digit == 7) {
+		return 0;
+	}
+
+	return 1;
+}
+
+bool get_digit_code_5(uint digit) {
+	if (digit == 1 || digit == 4) {
+		return 0;
+	}
+
+	return 1;
+}
+
+bool get_digit_code_6(uint digit) {
+	if (digit == 0 || digit == 1 || digit == 7) {
+		return 0;
+	}
+
+	return 1;
+}
+
+float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size) {
+    uint2 reversed_size = size.yx;
+    uint2 og = {0, 0};
+
+    if (get_digit_code_0(digit)) {
+        og.x = origin.x + size.x - size.y;
+        og.y = origin.y - size.x;
+
+        if (in_rect(pixel_pos, og, reversed_size)) {
+            return 1.0;
+        }
+    }
+
+    if (get_digit_code_1(digit)) {
+        og.x = origin.x + size.x - size.y;
+        og.y = origin.y;
+
+        if (in_rect(pixel_pos, og, reversed_size)) {
+            return 1.0;
+        }
+    }
+
+    if (get_digit_code_2(digit)) {
+        og.x = origin.x;
+        og.y = origin.y;
+
+        if (in_rect(pixel_pos, og, size)) {
+            return 1.0;
+        }
+    }
+
+    if (get_digit_code_3(digit)) {
+        og.x = origin.x;
+        og.y = origin.y;
+
+        if (in_rect(pixel_pos, og, reversed_size)) {
+            return 1.0;
+        }
+    }
+
+    if (get_digit_code_4(digit)) {
+        og.x = origin.x;
+        og.y = origin.y - size.x;
+
+        if (in_rect(pixel_pos, og, reversed_size)) {
+            return 1.0;
+        }
+    }
+
+    if (get_digit_code_5(digit)) {
+        og.x = origin.x;
+        og.y = origin.y - 2*size.x + size.y;
+
+        if (in_rect(pixel_pos, og, size)) {
+            return 1.0;
+        }
+    }
+
+    if (get_digit_code_6(digit)) {
+        og.x = origin.x;
+        og.y = origin.y - size.x + 0.5*size.y;
+
+        if (in_rect(pixel_pos, og, size)) {
+            return 1.0;
+        }
+    }
+
+    return 0.0;
+}
+
+float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uint2 size) {
+    uint2 display_origin = init_display_origin;
+    uint delta = size.x + 10;
+
+    uint num_digits = 0;
+    //float fnumber = number;
+    float result = 0.0;
+
+    while (1) {
+        uint digit = fmod(number, 10);
+
+        if (digit == 0) {
+            if (num_digits > 0) {
+                break;
+            }
+        }
+
+        result = digit_display_shader(digit, pixel_pos, display_origin, size);
+
+        if (result > 0.0) {
+            break;
+        }
+
+        number = number/10;
+
+        display_origin.x = display_origin.x - delta;
+        num_digits += 1;
+    }
+
+    return result;
+}
+
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -169,16 +342,44 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 
     uint2 pixel_pos = DTid.xy;
 
-    for (uint i = 0; i < num_circles; i++) {
-        uint4 bbox = load_bbox_at_index(i);
-        bool hit = is_pixel_in_bbox(pixel_pos, bbox);
+//    uint4 bbox = load_bbox_at_index(0);
+//    float4 color = load_color_at_index(0);
 
-        if (hit) {
-            float4 color = load_color_at_index(i);
-            float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
-            bg = blend_pd_over(bg, fg);
-        }
-    }
+    uint value1 = circle_bbox_buffer.Load(0);
+    uint value2 = circle_bbox_buffer.Load(4);
+    uint value3 = circle_color_buffer.Load(0);
+//
+//    bool test = (value == 6553800);
+//    uint4 test_bbox = {100, 200, 100, 200};
+//    float4 test_success_color = {0.0f, 1.0f, 0.0f, 1.0f};
+//    float4 test_fail_color = {1.0f, 0.0f, 0.0f, 1.0f};
+//
+//    if (test) {
+//        fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_success_color);
+//    } else {
+//        fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_fail_color);
+//    }
+
+
+    uint2 rect_origin = {400, 300};
+    uint2 rect_size = {100, 20};
+    fg.r = 1.0f;
+    fg.g = 1.0f;
+    fg.b = 1.0f;
+    // should print out 6553800
+    fg.a = number_shader(value1, pixel_pos, rect_origin, rect_size);
+    bg = blend_pd_over(bg, fg);
+
+//    for (uint i = 0; i < num_circles; i++) {
+//        uint4 bbox = load_bbox_at_index(i);
+//        bool hit = is_pixel_in_bbox(pixel_pos, bbox);
+//
+//        if (hit) {
+//            float4 color = load_color_at_index(i);
+//            float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
+//            bg = blend_pd_over(bg, fg);
+//        }
+//    }
 
     canvas[DTid.xy] = bg;
 }
@@ -224,7 +425,8 @@ pub struct GpuState {
     vertex_buffer: dx12::Resource,
     vertex_buffer_view: d3d12::D3D12_VERTEX_BUFFER_VIEW,
     num_circles_buffer: dx12::Resource,
-    circle_buffer: dx12::Resource,
+    circle_bbox_buffer: dx12::Resource,
+    circle_color_buffer: dx12::Resource,
 
     // synchronizers
     frame_index: usize,
@@ -248,7 +450,8 @@ impl GpuState {
 
         let width = wnd.get_width();
         let height = wnd.get_height();
-        let circles = scene::create_random_scene(width, height, 1000);
+        let num_circles = 1;
+        let (bbox_data, color_data) = scene::create_constant_scene(width, height, num_circles);
 
         let f_tile_size = tile_size as f32;
         let f_width = width as f32;
@@ -287,7 +490,8 @@ impl GpuState {
             swapchain,
             device,
             num_circles_buffer,
-            circle_buffer,
+            circle_bbox_buffer,
+            circle_color_buffer,
             compute_target,
             render_targets,
             command_allocators,
@@ -295,7 +499,7 @@ impl GpuState {
             compute_target_descriptor_heap,
             rtv_descriptor_heap,
             fence,
-        ) = GpuState::create_pipeline_dependencies(width, height, wnd, circles);
+        ) = GpuState::create_pipeline_dependencies(width, height, wnd, num_circles, bbox_data, color_data);
 
         let (
             compute_root_signature,
@@ -342,7 +546,8 @@ impl GpuState {
             vertex_buffer,
             vertex_buffer_view,
             num_circles_buffer,
-            circle_buffer,
+            circle_bbox_buffer,
+            circle_color_buffer,
             num_dispatch_threadgroups_x,
             num_dispatch_threadgroups_y,
         };
@@ -398,7 +603,7 @@ impl GpuState {
         self.command_list.set_graphics_root_descriptor_table(
             0,
             self.compute_descriptor_heap
-                .get_gpu_descriptor_handle_at_offset(2),
+                .get_gpu_descriptor_handle_at_offset(3),
         );
         self.command_list.set_viewport(&self.viewport);
         println!("      command list: set scissor rect...");
@@ -506,10 +711,13 @@ impl GpuState {
         width: u32,
         height: u32,
         wnd: &window::Window,
-        circles: Vec<scene::Circle>,
+        num_circles: u32,
+        bbox_data: Vec<u8>,
+        color_data: Vec<u8>,
     ) -> (
         dx12::SwapChain3,
         dx12::Device,
+        dx12::Resource,
         dx12::Resource,
         dx12::Resource,
         dx12::Resource,
@@ -543,7 +751,7 @@ impl GpuState {
         // create compute resource descriptor heap
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: 3,
+            NumDescriptors: 4,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
@@ -588,18 +796,17 @@ impl GpuState {
             ptr::null(),
         );
         num_circles_buffer
-            .upload_data_to_resource(256, &(circles.len() as u32));
+            .upload_data_to_resource(256, &num_circles);
         device.create_constant_buffer_view(
             num_circles_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(0),
             padded_size_in_bytes as u32,
         );
 
-        println!("creating circle buffer resource...");
-        // create circle buffer
-        let circle_buffer_stride = mem::size_of::<scene::Circle>();
-        let circle_buffer_size = circle_buffer_stride * circles.len();
-        let circle_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        println!("creating circle bbox buffer resource...");
+        // create circle bbox buffer
+        let circle_bbox_buffer_size_in_bytes = bbox_data.len();
+        let circle_bbox_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
             //TODO: what should MemoryPoolPreference flag be?
@@ -608,9 +815,9 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let circle_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
+        let circle_bbox_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: circle_buffer_size as u64,
+            Width: circle_bbox_buffer_size_in_bytes as u64,
             Height: 1,
             DepthOrArraySize: 1,
             MipLevels: 1,
@@ -622,7 +829,7 @@ impl GpuState {
             Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
             ..mem::zeroed()
         };
-        let circle_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        let circle_bbox_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -632,21 +839,73 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let circle_buffer = device.create_committed_resource(
-            &circle_buffer_heap_properties,
+        let circle_bbox_buffer = device.create_committed_resource(
+            &circle_bbox_buffer_heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &circle_buffer_resource_description,
+            &circle_bbox_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        circle_buffer.upload_data_to_resource(circles.len(), (&circles).as_ptr());
-        device.create_structured_buffer_shader_resource_view(
-            circle_buffer.clone(),
+        let bbox_data_pointer: *const u8 = bbox_data.as_slice().as_ptr();
+        circle_bbox_buffer.upload_data_to_resource(bbox_data.len(), bbox_data_pointer);
+        device.create_byte_addressed_buffer_shader_resource_view(
+            circle_bbox_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
             0,
-            circles.len() as u32,
-            circle_buffer_stride as u32,
+            bbox_data.len() as u32,
+        );
+
+        println!("creating circle color buffer resource...");
+        // create circle color buffer
+        let circle_color_buffer_size_in_bytes = color_data.len();
+        let circle_color_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let circle_color_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: circle_color_buffer_size_in_bytes as u64,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            ..mem::zeroed()
+        };
+        let circle_color_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let circle_color_buffer = device.create_committed_resource(
+            &circle_bbox_buffer_heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &circle_bbox_buffer_resource_description,
+            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            ptr::null(),
+        );
+        circle_color_buffer.upload_data_to_resource(color_data.len(), &color_data);
+        device.create_byte_addressed_buffer_shader_resource_view(
+            circle_color_buffer.clone(),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(2),
+            0,
+            bbox_data.len() as u32,
         );
 
         println!("creating intermediate target resource...");
@@ -691,7 +950,7 @@ impl GpuState {
         );
         device.create_unordered_access_view(
             compute_target.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(2),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(3),
         );
 
         // create swapchain
@@ -758,7 +1017,8 @@ impl GpuState {
             swap_chain3,
             device,
             num_circles_buffer,
-            circle_buffer,
+            circle_bbox_buffer,
+            circle_color_buffer,
             compute_target,
             render_targets,
             command_allocators,
@@ -780,24 +1040,24 @@ impl GpuState {
         let compute_cbv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
+            OffsetInDescriptorsFromTableStart: 0,
             ..mem::zeroed()
         };
         let compute_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
+            NumDescriptors: 2,
+            OffsetInDescriptorsFromTableStart: 1,
             ..mem::zeroed()
         };
         let compute_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: d3d12::D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND,
+            OffsetInDescriptorsFromTableStart: 3,
             ..mem::zeroed()
         };
         let descriptor_ranges = [compute_cbv_descriptor_range, compute_srv_descriptor_range, compute_uav_descriptor_range];
         let compute_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
-            NumDescriptorRanges: 3,
+            NumDescriptorRanges: descriptor_ranges.len() as u32,
             pDescriptorRanges: descriptor_ranges.as_ptr() as *const _,
         };
         let mut compute_root_parameter = d3d12::D3D12_ROOT_PARAMETER {

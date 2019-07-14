@@ -496,6 +496,29 @@ impl Device {
             .CreateConstantBufferView(&cbv_desc as *const _, descriptor);
     }
 
+    pub unsafe fn create_byte_addressed_buffer_shader_resource_view(
+        &self,
+        resource: Resource,
+        descriptor: CpuDescriptor,
+        first_element: u64,
+        num_elements: u32,
+    ) {
+        let mut srv_desc = d3d12::D3D12_SHADER_RESOURCE_VIEW_DESC {
+            Format: dxgiformat::DXGI_FORMAT_UNKNOWN,
+            ViewDimension: d3d12::D3D12_SRV_DIMENSION_BUFFER,
+            Shader4ComponentMapping: 0x1688,
+            ..mem::zeroed()
+        };
+        *srv_desc.u.Buffer_mut() = d3d12::D3D12_BUFFER_SRV {
+            FirstElement: first_element,
+            NumElements: num_elements,
+            StructureByteStride: 1,
+            Flags: d3d12::D3D12_BUFFER_SRV_FLAG_NONE,
+        };
+        self.0
+            .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
+    }
+
     pub unsafe fn create_structured_buffer_shader_resource_view(
         &self,
         resource: Resource,

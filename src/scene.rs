@@ -1,31 +1,54 @@
 extern crate rand;
+extern crate byteorder;
 
 use rand::Rng;
+use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
+use std::io::Cursor;
 
-#[repr(C)]
-pub struct Circle {
-    radius: f32,
-    center: [f32; 2],
-    color: [f32; 4],
-    pad: f32,
-}
-
-pub fn create_random_scene(screen_width: u32, screen_height: u32, num_circles: u32) -> Vec<Circle> {
+pub unsafe fn create_random_scene(screen_width: u32, screen_height: u32, num_circles: u32) -> (Vec<u8>, Vec<u8>) {
     let mut rng = rand::thread_rng();
 
-    let mut circles: Vec<Circle> = Vec::new();
+    let mut bbox_data: Vec<u8> = Vec::new();
+    let mut color_data: Vec<u8> = Vec::new();
 
     for n in 0..num_circles {
-        circles.push(Circle {
-            radius: rng.gen_range(10.0, 100.0),
-            center: [
-                rng.gen_range(0.0, screen_width as f32),
-                rng.gen_range(0.0, screen_height as f32),
-            ],
-            color: [rng.gen(), rng.gen(), rng.gen(), rng.gen()],
-            pad: 0.0,
-        })
+        let diameter: u16 = rng.gen_range(20, 200);
+        let bbox_min_x: u16 = rng.gen_range(0, screen_width as u16);
+        let bbox_min_y: u16 = rng.gen_range(0, screen_height as u16);
+        bbox_data.write_u16::<BigEndian>(bbox_min_x).expect("could not convert u16 to bytes");
+        bbox_data.write_u16::<BigEndian>(bbox_min_x + diameter).expect("could not convert u16 to bytes");
+        bbox_data.write_u16::<BigEndian>(bbox_min_y).expect("could not convert u16 to bytes");
+        bbox_data.write_u16::<BigEndian>(bbox_min_y + diameter).expect("could not convert u16 to bytes");
+
+        for i in 0..4 {
+            color_data.push(rng.gen());
+        }
     }
 
-    circles
+    (bbox_data, color_data)
+}
+
+
+pub unsafe fn create_constant_scene(screen_width: u32, screen_height: u32, num_circles: u32) -> (Vec<u8>, Vec<u8>) {
+    let mut rng = rand::thread_rng();
+
+    let mut bbox_data: Vec<u8> = Vec::new();
+    let mut color_data: Vec<u8> = Vec::new();
+
+    let diameter: u16 = 100;
+    let bbox_min_x: u16 = 100;
+    let bbox_min_y: u16 = 100;
+    bbox_data.write_u16::<BigEndian>(bbox_min_x).expect("could not convert u16 to bytes");
+    bbox_data.write_u16::<BigEndian>(bbox_min_x + diameter).expect("could not convert u16 to bytes");
+
+    //let mut reader = Cursor::new(&bbox_data);
+
+    bbox_data.write_u16::<BigEndian>(bbox_min_y).expect("could not convert u16 to bytes");
+    bbox_data.write_u16::<BigEndian>(bbox_min_y + diameter).expect("could not convert u16 to bytes");
+
+    for i in 0..4 {
+        color_data.push(255);
+    }
+
+    (bbox_data, color_data)
 }
