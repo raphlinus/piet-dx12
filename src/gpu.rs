@@ -75,8 +75,8 @@ float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
 }
 
 float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, float4 circle_color) {
-    uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5), lerp(circle_bbox[2], circle_bbox[3], 0.5)};
-    float radius = circle_bbox[1] - circle_bbox[2];
+    uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5f), lerp(circle_bbox[2], circle_bbox[3], 0.5f)};
+    float radius = (circle_bbox[1] - circle_bbox[0])*0.5f;
     float position_based_alpha = circle_shader(pixel_pos, circle_center, radius);
 
     float4 pixel_color = {circle_color.r, circle_color.g, circle_color.b, circle_color.a*position_based_alpha};
@@ -106,9 +106,9 @@ uint4 extract_u8s_from_uint(uint input_value) {
     uint b_shift = 8;
 
     uint mask_a = 255;
-    uint mask_b = mask_a << r_shift;
+    uint mask_b = mask_a << b_shift;
     uint mask_g = mask_a << g_shift;
-    uint mask_r = mask_a << b_shift;
+    uint mask_r = mask_a << r_shift;
 
     uint r = (mask_r & input_value) >> r_shift;
     uint g = (mask_g & input_value) >> g_shift;
@@ -308,17 +308,11 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     uint delta = size.x + 10;
 
     uint num_digits = 0;
-    //float fnumber = number;
+    double fnumber = number;
     float result = 0.0;
 
     while (1) {
-        uint digit = fmod(number, 10);
-
-        if (digit == 0) {
-            if (num_digits > 0) {
-                break;
-            }
-        }
+        uint digit = round(fmod(fnumber, 10.0L));
 
         result = digit_display_shader(digit, pixel_pos, display_origin, size);
 
@@ -326,10 +320,12 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
             break;
         }
 
-        number = number/10;
-
+        fnumber = trunc(fnumber/10.0L);
         display_origin.x = display_origin.x - delta;
-        num_digits += 1;
+
+        if (fnumber == 0.0f) {
+            break;
+        }
     }
 
     return result;
@@ -342,13 +338,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 
     uint2 pixel_pos = DTid.xy;
 
-//    uint4 bbox = load_bbox_at_index(0);
-//    float4 color = load_color_at_index(0);
-
-    uint value1 = circle_bbox_buffer.Load(0);
-    uint value2 = circle_bbox_buffer.Load(4);
-    uint value3 = circle_color_buffer.Load(0);
-//
+//    // boolean value display
 //    bool test = (value == 6553800);
 //    uint4 test_bbox = {100, 200, 100, 200};
 //    float4 test_success_color = {0.0f, 1.0f, 0.0f, 1.0f};
@@ -361,25 +351,26 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 //    }
 
 
-    uint2 rect_origin = {400, 300};
-    uint2 rect_size = {100, 20};
-    fg.r = 1.0f;
-    fg.g = 1.0f;
-    fg.b = 1.0f;
-    // should print out 6553800
-    fg.a = number_shader(value1, pixel_pos, rect_origin, rect_size);
-    bg = blend_pd_over(bg, fg);
+//    // unsigned integer value display
+//    uint2 rect_origin = {800, 300};
+//    uint2 rect_size = {50, 10};
+//    fg.r = 1.0f;
+//    fg.g = 1.0f;
+//    fg.b = 1.0f;
+//    // should print out 6553800
+//    fg.a = number_shader(color.a, pixel_pos, rect_origin, rect_size);
+//    bg = blend_pd_over(bg, fg);
 
-//    for (uint i = 0; i < num_circles; i++) {
-//        uint4 bbox = load_bbox_at_index(i);
-//        bool hit = is_pixel_in_bbox(pixel_pos, bbox);
-//
-//        if (hit) {
-//            float4 color = load_color_at_index(i);
-//            float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
-//            bg = blend_pd_over(bg, fg);
-//        }
-//    }
+    for (uint i = 0; i < num_circles; i++) {
+        uint4 bbox = load_bbox_at_index(i);
+        bool hit = is_pixel_in_bbox(pixel_pos, bbox);
+
+        if (hit) {
+            float4 color = load_color_at_index(i);
+            float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
+            bg = blend_pd_over(bg, fg);
+        }
+    }
 
     canvas[DTid.xy] = bg;
 }
@@ -450,8 +441,8 @@ impl GpuState {
 
         let width = wnd.get_width();
         let height = wnd.get_height();
-        let num_circles = 1;
-        let (bbox_data, color_data) = scene::create_constant_scene(width, height, num_circles);
+        let num_circles = 1000;
+        let (bbox_data, color_data) = scene::create_random_scene(width, height, num_circles);
 
         let f_tile_size = tile_size as f32;
         let f_width = width as f32;
@@ -847,8 +838,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        let bbox_data_pointer: *const u8 = bbox_data.as_slice().as_ptr();
-        circle_bbox_buffer.upload_data_to_resource(bbox_data.len(), bbox_data_pointer);
+        circle_bbox_buffer.upload_data_to_resource(bbox_data.len(), bbox_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             circle_bbox_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
@@ -900,12 +890,12 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        circle_color_buffer.upload_data_to_resource(color_data.len(), &color_data);
+        circle_color_buffer.upload_data_to_resource(color_data.len(), color_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             circle_color_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(2),
             0,
-            bbox_data.len() as u32,
+            color_data.len() as u32,
         );
 
         println!("creating intermediate target resource...");
