@@ -66,7 +66,13 @@ cbuffer Constants : register(b0)
 ByteAddressBuffer circle_bbox_buffer : register(t0);
 ByteAddressBuffer circle_color_buffer : register(t1);
 
-RWTexture2D<float4> canvas : register(u0);
+// at most there can be num_circles commands per command list
+// assume there are around 50000 tiles
+// assume that num_circles is 1000,
+// then there will be around 50000*1000*4 bytes needed to be stored in per_tile_command_list
+// 50000*1000*4 bytes = ~200 MB
+RWByteAddressBuffer per_tile_command_list: register(u0);
+RWTexture2D<float4> canvas : register(u1);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
     float d = distance(pixel_pos, center_pos);
@@ -329,6 +335,48 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     }
 
     return result;
+}
+
+uint4 generate_tile_bbox(uint x, uint y) {
+    uint left = x*tile_size;
+    uint top = y*tile_size;
+    uint bot = top + tile_size;
+    uint right = left + tile_size;
+
+    uint4 result = {left, right, top, bot};
+    return result;
+}
+
+bool do_tiles_intersect(uint4 bbox0, uint4 bbox1) {
+    if (bbox1[0] >= bbox0[1] && bbox1[0] >= bbox0[1]) {
+        return 1;
+    }
+
+    return 0;
+}
+
+uint pack_command(uint tile_ix) {
+    return tile_ix;
+}
+
+[numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
+void build_per_tile_command_list(uint3 DTid.xy : SV_DispatchThreadID) {
+    uint tile_ix = DTid.x * DTid.y;
+    uint tile_address = num_circles*tile_ix*4;
+    uint4 tile_bbox = generate_tile_bbox(DTid.x, DTid.y);
+
+    for (uint i = 0; i < num_circles; i++) {
+        uint4 bbox = load_bbox_at_index(i);
+        bool hit = do_tiles_intersect(pixel_pos, tile_bbox);
+
+        if (hit) {
+            per_tile_command_list[tile_address] = pack_command(tile_ix);
+            tile_address += 4;
+        }
+    }
+
+    // mark end of command list for this tile
+    per_tile_command_list[tile_address] = 4294967295;
 }
 
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
