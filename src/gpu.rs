@@ -56,7 +56,7 @@ impl Quad {
 const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 fn materialize_shader_code(tile_size: u32, shader_template_path: &Path, shader_path: &Path) {
-    let step0 = std::fs::read_to_string(shader_template_file_path);
+    let step0 = std::fs::read_to_string(shader_template_path).expect("could not read data from provided shader template path");
 
     let step1 = step0.replace("~TILE_SIZE_SQUARED~", &format!("{}", tile_size * tile_size));
     let step2 = step1.replace("~TILE_SIZE~", &format!("{}", tile_size));

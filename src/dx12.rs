@@ -8,6 +8,7 @@ use winapi::Interface;
 use wio::com::ComPtr;
 use crate::error;
 use crate::error::error_if_failed_else_unit;
+use std::os::windows::ffi::OsStrExt;
 
 // everything is ripped from d3d12-rs, but wio::com::ComPtr, and winapi are used more directly
 
@@ -242,7 +243,7 @@ impl SwapChain3 {
 
 impl Blob {
     pub unsafe fn print_to_console(blob: Blob) {
-        let blob_as_string = ffi::CStr::from_ptr(my_string()).to_string_lossy().into_owned();
+        let blob_as_string = ffi::CStr::from_ptr(blob.0.as_raw() as *const _).to_string_lossy().into_owned();
         println!("{}", blob_as_string);
     }
 }
@@ -706,9 +707,9 @@ impl ShaderByteCode {
 
         let target = ffi::CString::new(target).expect("could not convert target string into C string");
         let entry = ffi::CString::new(entry).expect("could not convert entry string into C string");
-
+        let encoded_file_path: Vec<u16> = file_path.as_os_str().encode_wide().collect();
         let hresult = winapi::um::d3dcompiler::D3DCompileFromFile(
-            file_path.as_os_str() as *const _,
+            encoded_file_path.as_ptr() as *const _,
             ptr::null(),
             ptr::null_mut(),
             entry.as_ptr() as *const _,
@@ -719,7 +720,8 @@ impl ShaderByteCode {
             &mut error as *mut _ as *mut _,
         );
 
-        Blob::print_to_console(error.clone());
+        let error_blob = Blob(ComPtr::from_raw(error));
+        Blob::print_to_console(error_blob.clone());
 
         error::error_if_failed_else_unit(hresult).expect("shader compilation failed");
 
