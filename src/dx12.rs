@@ -1,15 +1,15 @@
 extern crate winapi;
 extern crate wio;
 
-use std::{ffi, mem, ptr};
+use std::{ffi, mem, ptr, path::{Path}};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
+use crate::error;
+use crate::error::error_if_failed_else_unit;
 
 // everything is ripped from d3d12-rs, but wio::com::ComPtr, and winapi are used more directly
-
-pub type D3DResult<T> = (T, winerror::HRESULT);
 
 #[derive(Clone)]
 pub struct Heap(pub ComPtr<d3d12::ID3D12Heap>);
@@ -85,29 +85,11 @@ pub struct ShaderByteCode {
 
 pub struct DebugController(pub d3d12sdklayers::ID3D12Debug);
 
-pub fn error_if_failed_else_value<T>(result: D3DResult<T>) -> Result<T, winerror::HRESULT> {
-    let (result_value, hresult) = result;
-
-    if winerror::SUCCEEDED(hresult) {
-        Ok(result_value)
-    } else {
-        Err(hresult)
-    }
-}
-
-pub fn error_if_failed_else_none(hresult: winerror::HRESULT) -> Result<(), winerror::HRESULT> {
-    if winerror::SUCCEEDED(hresult) {
-        Ok(())
-    } else {
-        Err(hresult)
-    }
-}
-
 impl Resource {
     pub unsafe fn upload_data_to_resource<T>(&self, count: usize, data: *const T) {
         let mut mapped_memory = ptr::null_mut();
         let zero_range = d3d12::D3D12_RANGE { ..mem::zeroed() };
-        error_if_failed_else_none(self.0.Map(
+        error::error_if_failed_else_unit(self.0.Map(
             0,
             &zero_range as *const _,
             &mut mapped_memory as *mut _ as *mut _,
@@ -132,7 +114,7 @@ impl Factory4 {
         #[cfg(not(debug_assertions))]
         let flags: u32 = 0;
 
-        error_if_failed_else_none(dxgi1_3::CreateDXGIFactory2(
+        error::error_if_failed_else_unit(dxgi1_3::CreateDXGIFactory2(
             flags,
             &dxgi1_4::IDXGIFactory4::uuidof(),
             &mut factory as *mut _ as *mut _,
@@ -159,7 +141,7 @@ impl Factory4 {
         desc: dxgi1_2::DXGI_SWAP_CHAIN_DESC1,
     ) -> SwapChain3 {
         let mut swap_chain = ptr::null_mut();
-        error_if_failed_else_none(self.0.CreateSwapChainForHwnd(
+        error::error_if_failed_else_unit(self.0.CreateSwapChainForHwnd(
             command_queue.0.as_raw() as *mut _,
             hwnd,
             &desc,
@@ -191,7 +173,7 @@ impl CommandQueue {
 impl SwapChain {
     pub unsafe fn get_buffer(&self, id: u32) -> Resource {
         let mut resource = ptr::null_mut();
-        error_if_failed_else_none(self.0.GetBuffer(
+        error::error_if_failed_else_unit(self.0.GetBuffer(
             id,
             &d3d12::ID3D12Resource::uuidof(),
             &mut resource as *mut _ as *mut _,
@@ -218,7 +200,7 @@ impl SwapChain1 {
 
     pub unsafe fn get_buffer(&self, id: u32) -> Resource {
         let mut resource = ptr::null_mut();
-        error_if_failed_else_none(self.0.GetBuffer(
+        error::error_if_failed_else_unit(self.0.GetBuffer(
             id,
             &d3d12::ID3D12Resource::uuidof(),
             &mut resource as *mut _ as *mut _,
@@ -232,7 +214,7 @@ impl SwapChain1 {
 impl SwapChain3 {
     pub unsafe fn get_buffer(&self, id: u32) -> Resource {
         let mut resource = ptr::null_mut();
-        error_if_failed_else_none(self.0.GetBuffer(
+        error::error_if_failed_else_unit(self.0.GetBuffer(
             id,
             &d3d12::ID3D12Resource::uuidof(),
             &mut resource as *mut _ as *mut _,
@@ -248,13 +230,20 @@ impl SwapChain3 {
 
     pub unsafe fn present(&self, interval: u32, flags: u32) {
         println!("  asking swapchain to present...");
-        error_if_failed_else_none(self.0.Present1(
+        error::error_if_failed_else_unit(self.0.Present1(
             interval,
             flags,
             &dxgi1_2::DXGI_PRESENT_PARAMETERS { ..mem::zeroed() } as *const _,
         ))
         .expect("could not present to swapchain");
         println!("  present successful.");
+    }
+}
+
+impl Blob {
+    pub unsafe fn print_to_console(blob: Blob) {
+        let blob_as_string = ffi::CStr::from_ptr(my_string()).to_string_lossy().into_owned();
+        println!("{}", blob_as_string);
     }
 }
 
@@ -310,7 +299,7 @@ impl Device {
         list_type: d3d12::D3D12_COMMAND_LIST_TYPE,
     ) -> CommandAllocator {
         let mut allocator = ptr::null_mut();
-        error_if_failed_else_none(self.0.CreateCommandAllocator(
+        error::error_if_failed_else_unit(self.0.CreateCommandAllocator(
             list_type,
             &d3d12::ID3D12CommandAllocator::uuidof(),
             &mut allocator as *mut _ as *mut _,
@@ -335,7 +324,7 @@ impl Device {
         };
 
         let mut cmd_q = ptr::null_mut();
-        error_if_failed_else_none(self.0.CreateCommandQueue(
+        error::error_if_failed_else_unit(self.0.CreateCommandQueue(
             &desc,
             &d3d12::ID3D12CommandQueue::uuidof(),
             &mut cmd_q as *mut _ as *mut _,
@@ -350,7 +339,7 @@ impl Device {
         heap_description: &d3d12::D3D12_DESCRIPTOR_HEAP_DESC,
     ) -> DescriptorHeap {
         let mut heap = ptr::null_mut();
-        error_if_failed_else_none(self.0.CreateDescriptorHeap(
+        error::error_if_failed_else_unit(self.0.CreateDescriptorHeap(
             heap_description,
             &d3d12::ID3D12DescriptorHeap::uuidof(),
             &mut heap as *mut _ as *mut _,
@@ -377,7 +366,7 @@ impl Device {
     ) -> PipelineState {
         let mut pipeline_state = ptr::null_mut();
 
-        error_if_failed_else_none(self.0.CreateGraphicsPipelineState(
+        error::error_if_failed_else_unit(self.0.CreateGraphicsPipelineState(
             graphics_pipeline_desc as *const _,
             &d3d12::ID3D12PipelineState::uuidof(),
             &mut pipeline_state as *mut _ as *mut _,
@@ -393,7 +382,7 @@ impl Device {
     ) -> PipelineState {
         let mut pipeline_state = ptr::null_mut();
 
-        error_if_failed_else_none(self.0.CreateComputePipelineState(
+        error::error_if_failed_else_unit(self.0.CreateComputePipelineState(
             compute_pipeline_desc as *const _,
             &d3d12::ID3D12PipelineState::uuidof(),
             &mut pipeline_state as *mut _ as *mut _,
@@ -409,7 +398,7 @@ impl Device {
         blob: Blob,
     ) -> RootSignature {
         let mut signature = ptr::null_mut();
-        error_if_failed_else_none(self.0.CreateRootSignature(
+        error::error_if_failed_else_unit(self.0.CreateRootSignature(
             node_mask,
             blob.0.GetBufferPointer(),
             blob.0.GetBufferSize(),
@@ -436,7 +425,7 @@ impl Device {
             NodeMask: node_mask,
         };
 
-        error_if_failed_else_none(self.0.CreateCommandSignature(
+        error::error_if_failed_else_unit(self.0.CreateCommandSignature(
             &desc,
             root_signature.0.as_raw(),
             &d3d12::ID3D12CommandSignature::uuidof(),
@@ -456,7 +445,7 @@ impl Device {
     ) -> GraphicsCommandList {
         let mut command_list = ptr::null_mut();
 
-        error_if_failed_else_none(self.0.CreateCommandList(
+        error::error_if_failed_else_unit(self.0.CreateCommandList(
             node_mask,
             list_type,
             allocator.0.as_raw(),
@@ -556,7 +545,7 @@ impl Device {
     // TODO: interface not complete
     pub unsafe fn create_fence(&self, initial: u64) -> Fence {
         let mut fence = ptr::null_mut();
-        error_if_failed_else_none(self.0.CreateFence(
+        error::error_if_failed_else_unit(self.0.CreateFence(
             initial,
             d3d12::D3D12_FENCE_FLAG_NONE,
             &d3d12::ID3D12Fence::uuidof(),
@@ -577,7 +566,7 @@ impl Device {
     ) -> Resource {
         let mut resource = ptr::null_mut();
 
-        error_if_failed_else_none(self.0.CreateCommittedResource(
+        error::error_if_failed_else_unit(self.0.CreateCommittedResource(
             heap_properties as *const _,
             flags,
             resource_description as *const _,
@@ -635,7 +624,7 @@ impl RootSignature {
         //TODO: properly use error blob
         let mut _error = ptr::null_mut();
 
-        error_if_failed_else_none(d3d12::D3D12SerializeRootSignature(
+        error::error_if_failed_else_unit(d3d12::D3D12SerializeRootSignature(
             desc as *const _,
             version,
             &mut blob as *mut _ as *mut _,
@@ -688,7 +677,7 @@ impl ShaderByteCode {
         let entry = ffi::CString::new(entry)
             .expect("could not convert entry name String into ffi::CString");
 
-        error_if_failed_else_none(winapi::um::d3dcompiler::D3DCompile(
+        error::error_if_failed_else_unit(winapi::um::d3dcompiler::D3DCompile(
             code.as_ptr() as *const _,
             code.len(),
             ptr::null(), // defines
@@ -707,22 +696,19 @@ impl ShaderByteCode {
     }
 
     pub unsafe fn compile_from_file(
-        file_path: String,
+        file_path: &Path,
         target: String,
         entry: String,
         flags: minwindef::DWORD,
     ) -> Blob {
         let mut shader = ptr::null_mut();
-        //TODO: use error blob properly
-        let mut _error = ptr::null_mut();
+        let mut error = ptr::null_mut();
 
-        let target = ffi::CString::new(target)
-            .expect("could not convert target format string into ffi::CString");
-        let entry = ffi::CString::new(entry)
-            .expect("could not convert entry name String into ffi::CString");
+        let target = ffi::CString::new(target).expect("could not convert target string into C string");
+        let entry = ffi::CString::new(entry).expect("could not convert entry string into C string");
 
-        error_if_failed_else_none(winapi::um::d3dcompiler::D3DCompileFromFile(
-            file_path.as_ptr() as *const _,
+        let hresult = winapi::um::d3dcompiler::D3DCompileFromFile(
+            file_path.as_os_str() as *const _,
             ptr::null(),
             ptr::null_mut(),
             entry.as_ptr() as *const _,
@@ -730,9 +716,12 @@ impl ShaderByteCode {
             flags,
             0,
             &mut shader as *mut _ as *mut _,
-            &mut _error as *mut _ as *mut _,
-        ))
-        .expect("could not compile shader code");
+            &mut error as *mut _ as *mut _,
+        );
+
+        Blob::print_to_console(error.clone());
+
+        error::error_if_failed_else_unit(hresult).expect("shader compilation failed");
 
         Blob(ComPtr::from_raw(shader))
     }
@@ -781,7 +770,7 @@ impl GraphicsCommandList {
     }
 
     pub unsafe fn reset(&self, allocator: CommandAllocator, initial_pso: PipelineState) {
-        error_if_failed_else_none(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw()))
+        error::error_if_failed_else_unit(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw()))
             .expect("could not reset command list");
     }
 
@@ -990,7 +979,7 @@ pub unsafe fn create_transition_resource_barrier(
 
 pub unsafe fn enable_debug_layer() {
     let mut debug_controller: *mut d3d12sdklayers::ID3D12Debug1 = ptr::null_mut();
-    error_if_failed_else_none(d3d12::D3D12GetDebugInterface(
+    error::error_if_failed_else_unit(d3d12::D3D12GetDebugInterface(
         &d3d12sdklayers::ID3D12Debug1::uuidof(),
         &mut debug_controller as *mut _ as *mut _,
     ))
