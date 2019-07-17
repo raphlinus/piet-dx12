@@ -100,9 +100,9 @@ float4 load_color_at_index(uint ix) {
 
 bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     uint px = pixel_pos.x;
+    uint py = pixel_pos.y;
 
     if (bbox[0] <= px && px <= bbox[1]) {
-        uint py = pixel_pos.y;
         if (bbox[2] <= py && py <= bbox[3]) {
             return 1;
         }

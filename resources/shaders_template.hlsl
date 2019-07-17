@@ -100,9 +100,9 @@ float4 load_color_at_index(uint ix) {
 
 bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     uint px = pixel_pos.x;
+    uint py = pixel_pos.y;
 
     if (bbox[0] <= px && px <= bbox[1]) {
-        uint py = pixel_pos.y;
         if (bbox[2] <= py && py <= bbox[3]) {
             return 1;
         }
@@ -327,7 +327,7 @@ uint unpack_command(uint command_address) {
 }
 
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
-void CSMain(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
+uint paint_objects(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
 

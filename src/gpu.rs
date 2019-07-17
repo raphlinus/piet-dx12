@@ -3,11 +3,11 @@ extern crate winapi;
 use crate::dx12;
 use crate::scene;
 use crate::window;
+use std::path::{Path, PathBuf};
 use std::{mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgiformat, dxgitype, minwindef, winerror};
 use winapi::um::{d3d12, d3dcommon};
 use winapi::Interface;
-use std::path::{Path, PathBuf};
 
 const FRAME_COUNT: u32 = 2;
 pub type VertexCoordinates = [f32; 3];
@@ -24,7 +24,6 @@ unsafe fn store_u32_in_256_bytes(x: u32) -> [u8; 256] {
 
     result
 }
-
 
 pub struct Quad {
     ox: f32,
@@ -56,55 +55,61 @@ impl Quad {
 const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
 fn materialize_shader_code(tile_size: u32, shader_template_path: &Path, shader_path: &Path) {
-    let step0 = std::fs::read_to_string(shader_template_path).expect("could not read data from provided shader template path");
+    let step0 = std::fs::read_to_string(shader_template_path)
+        .expect("could not read data from provided shader template path");
 
     let step1 = step0.replace("~TILE_SIZE_SQUARED~", &format!("{}", tile_size * tile_size));
     let step2 = step1.replace("~TILE_SIZE~", &format!("{}", tile_size));
-    
-    std::fs::write(shader_path, step2);
-}
 
+    std::fs::write(shader_path, step2).expect("shader template could not be materialized");
+}
 
 pub struct GpuState {
     width: u32,
     height: u32,
 
     // pipeline stuff
-    viewport: d3d12::D3D12_VIEWPORT,
-    scissor_rect: d3d12::D3D12_RECT,
-    swapchain: dx12::SwapChain3,
     device: dx12::Device,
     command_allocators: Vec<dx12::CommandAllocator>,
     command_queue: dx12::CommandQueue,
-    compute_root_signature: dx12::RootSignature,
-    compute_descriptor_heap: dx12::DescriptorHeap,
-    compute_target: dx12::Resource,
-    graphics_root_signature: dx12::RootSignature,
-    rtv_descriptor_heap: dx12::DescriptorHeap,
-    render_targets: Vec<dx12::Resource>,
-    graphics_pipeline_state: dx12::PipelineState,
-    compute_pipeline_state: dx12::PipelineState,
     command_list: dx12::GraphicsCommandList,
+
+    viewport: d3d12::D3D12_VIEWPORT,
+    scissor_rect: d3d12::D3D12_RECT,
+    swapchain: dx12::SwapChain3,
     vertex_buffer: dx12::Resource,
     vertex_buffer_view: d3d12::D3D12_VERTEX_BUFFER_VIEW,
-    num_circles_buffer: dx12::Resource,
+    rtv_descriptor_heap: dx12::DescriptorHeap,
+    render_targets: Vec<dx12::Resource>,
+    graphics_root_signature: dx12::RootSignature,
+    graphics_pipeline_state: dx12::PipelineState,
+
+    num_tiles_x: u32,
+    num_tiles_y: u32,
+
+    compute_descriptor_heap: dx12::DescriptorHeap,
+    constants_buffer: dx12::Resource,
     circle_bbox_buffer: dx12::Resource,
     circle_color_buffer: dx12::Resource,
+    per_tile_command_lists_buffer: dx12::Resource,
+    intermediate_target_texture: dx12::Resource,
+    per_tile_command_lists_root_signature: dx12::RootSignature,
+    paint_root_signature: dx12::RootSignature,
+    per_tile_command_lists_pipeline_state: dx12::PipelineState,
+    paint_pipeline_state: dx12::PipelineState,
 
     // synchronizers
     frame_index: usize,
     fence_event: dx12::Event,
     fence: dx12::Fence,
     fence_values: Vec<u64>,
-
-    num_dispatch_threadgroups_x: u32,
-    num_dispatch_threadgroups_y: u32,
 }
 
 impl GpuState {
     pub unsafe fn new(
         wnd: &window::Window,
-        compute_entry: String,
+        per_tile_command_lists_entry: String,
+        paint_entry: String,
         vertex_entry: String,
         fragment_entry: String,
         tile_size: u32,
@@ -124,8 +129,8 @@ impl GpuState {
         let f_height = height as f32;
         let canvas_quad_width = (f_width / f_tile_size).ceil() * f_tile_size;
         let canvas_quad_height = (f_height / f_tile_size).ceil() * f_tile_size;
-        let num_dispatch_threadgroups_x = (canvas_quad_width / f_tile_size) as u32;
-        let num_dispatch_threadgroups_y = (canvas_quad_height / f_tile_size) as u32;
+        let num_tiles_x = (canvas_quad_width / f_tile_size) as u32;
+        let num_tiles_y = (canvas_quad_height / f_tile_size) as u32;
         let canvas_quad = Quad::new(
             -1.0 * (canvas_quad_width / 2.0),
             -1.0 * (canvas_quad_height / 2.0),
@@ -152,24 +157,43 @@ impl GpuState {
         #[cfg(debug_assertions)]
         dx12::enable_debug_layer();
 
-        let (
-            swapchain,
-            device,
-            num_circles_buffer,
-            circle_bbox_buffer,
-            circle_color_buffer,
-            compute_target,
-            render_targets,
-            command_allocators,
-            command_queue,
-            compute_target_descriptor_heap,
-            rtv_descriptor_heap,
-            fence,
-        ) = GpuState::create_pipeline_dependencies(width, height, wnd, num_circles, bbox_data, color_data);
+        let (factory4, device, command_allocators, command_queue, fence, fence_event) =
+            GpuState::create_shared_pipeline_dependencies();
+
+        let (swapchain, rtv_descriptor_heap, render_targets) =
+            GpuState::create_graphics_pipeline_dependencies(
+                device.clone(),
+                width,
+                height,
+                wnd,
+                factory4,
+                command_queue.clone(),
+            );
 
         let (
-            compute_root_signature,
-            compute_pipeline_state,
+            compute_descriptor_heap,
+            constants_buffer,
+            circle_bbox_buffer,
+            circle_color_buffer,
+            per_tile_command_lists_buffer,
+            intermediate_target_texture,
+        ) = GpuState::create_compute_pipeline_dependencies(
+            device.clone(),
+            width,
+            height,
+            num_circles,
+            num_tiles_x,
+            num_tiles_y,
+            tile_size,
+            bbox_data,
+            color_data,
+        );
+
+        let (
+            per_tile_command_lists_root_signature,
+            per_tile_command_lists_pipeline_state,
+            paint_root_signature,
+            paint_pipeline_state,
             graphics_root_signature,
             graphics_pipeline_state,
             vertex_buffer,
@@ -178,44 +202,53 @@ impl GpuState {
         ) = GpuState::create_pipeline_states(
             &device,
             &shader_path,
-            compute_entry,
+            per_tile_command_lists_entry,
+            paint_entry,
             vertex_entry,
             fragment_entry,
             &command_allocators,
             canvas_quad,
         );
 
-        let fence_event = dx12::Event::create(false, false);
-
         let mut gpu_state = GpuState {
             width,
             height,
+
+            // pipeline stuff
+            device,
+            command_allocators,
+            command_queue,
+            command_list,
+
             viewport,
             scissor_rect,
             swapchain,
-            device,
-            compute_target,
-            render_targets,
-            command_allocators,
-            command_queue,
-            compute_root_signature,
-            graphics_root_signature,
+            vertex_buffer,
+            vertex_buffer_view,
             rtv_descriptor_heap,
-            compute_descriptor_heap: compute_target_descriptor_heap,
-            compute_pipeline_state,
+            render_targets,
+            graphics_root_signature,
             graphics_pipeline_state,
-            command_list,
+
+            num_tiles_x,
+            num_tiles_y,
+
+            compute_descriptor_heap,
+            constants_buffer,
+            circle_bbox_buffer,
+            circle_color_buffer,
+            per_tile_command_lists_buffer,
+            intermediate_target_texture,
+            per_tile_command_lists_root_signature,
+            paint_root_signature,
+            per_tile_command_lists_pipeline_state,
+            paint_pipeline_state,
+
+            // synchronizers
             frame_index: 0,
             fence_event,
             fence,
             fence_values: (0..FRAME_COUNT).into_iter().map(|_| 1).collect(),
-            vertex_buffer,
-            vertex_buffer_view,
-            num_circles_buffer,
-            circle_bbox_buffer,
-            circle_color_buffer,
-            num_dispatch_threadgroups_x,
-            num_dispatch_threadgroups_y,
         };
 
         // wait for upload of any resources to gpu
@@ -229,15 +262,15 @@ impl GpuState {
         println!("      resetting relevant command allocator...");
         self.command_allocators[self.frame_index].reset();
 
-        // compute pipeline call
+        // per tile command list generation call
         println!("      resetting command list...");
         self.command_list.reset(
             self.command_allocators[self.frame_index].clone(),
-            self.compute_pipeline_state.clone(),
+            self.per_tile_command_lists_pipeline_state.clone(),
         );
-        println!("      command list: set compute root signature...");
+
         self.command_list
-            .set_compute_root_signature(self.compute_root_signature.clone());
+            .set_compute_root_signature(self.per_tile_command_lists_root_signature.clone());
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_compute_root_descriptor_table(
@@ -245,16 +278,37 @@ impl GpuState {
             self.compute_descriptor_heap
                 .get_gpu_descriptor_handle_at_offset(0),
         );
-        self.command_list.dispatch(
-            self.num_dispatch_threadgroups_x,
-            self.num_dispatch_threadgroups_y,
-            1,
+
+        self.command_list
+            .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
+
+        // need to ensure all writes to per_tile_command_lists are complete before any reads are done
+        let synchronize_wrt_per_tile_command_lists =
+            dx12::create_uav_resource_barrier(self.per_tile_command_lists_buffer.0.as_raw());
+        self.command_list
+            .set_resource_barrier(vec![synchronize_wrt_per_tile_command_lists]);
+
+        // paint call
+        self.command_list
+            .set_pipeline_state(self.paint_pipeline_state.clone());
+        self.command_list
+            .set_compute_root_signature(self.paint_root_signature.clone());
+        self.command_list
+            .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
+        self.command_list.set_compute_root_descriptor_table(
+            0,
+            self.compute_descriptor_heap
+                .get_gpu_descriptor_handle_at_offset(0),
         );
 
-        // need to ensure all writes to resource are complete before any reads are done
-        let synchronize_uav = dx12::create_uav_resource_barrier(self.compute_target.0.as_raw());
         self.command_list
-            .set_resource_barrier(vec![synchronize_uav]);
+            .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
+
+        // need to ensure all writes to intermediate are complete before any reads are done
+        let synchronize_wrt_intermediate_target =
+            dx12::create_uav_resource_barrier(self.intermediate_target_texture.0.as_raw());
+        self.command_list
+            .set_resource_barrier(vec![synchronize_wrt_intermediate_target]);
 
         // graphics pipeline call
         println!("      setting command list pipeline state to graphics...");
@@ -269,7 +323,7 @@ impl GpuState {
         self.command_list.set_graphics_root_descriptor_table(
             0,
             self.compute_descriptor_heap
-                .get_gpu_descriptor_handle_at_offset(3),
+                .get_gpu_descriptor_handle_at_offset(4),
         );
         self.command_list.set_viewport(&self.viewport);
         println!("      command list: set scissor rect...");
@@ -373,26 +427,13 @@ impl GpuState {
         }
     }
 
-    unsafe fn create_pipeline_dependencies(
-        width: u32,
-        height: u32,
-        wnd: &window::Window,
-        num_circles: u32,
-        bbox_data: Vec<u8>,
-        color_data: Vec<u8>,
-    ) -> (
-        dx12::SwapChain3,
+    unsafe fn create_shared_pipeline_dependencies() -> (
+        dx12::Factory4,
         dx12::Device,
-        dx12::Resource,
-        dx12::Resource,
-        dx12::Resource,
-        dx12::Resource,
-        Vec<dx12::Resource>,
         Vec<dx12::CommandAllocator>,
         dx12::CommandQueue,
-        dx12::DescriptorHeap,
-        dx12::DescriptorHeap,
         dx12::Fence,
+        dx12::Event,
     ) {
         // create factory4
         let factory4 = dx12::Factory4::create(0);
@@ -413,23 +454,119 @@ impl GpuState {
         let command_queue =
             device.create_command_queue(list_type, 0, d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE, 0);
 
-        println!("creating compute resource descriptor heap...");
+        let mut command_allocators: Vec<dx12::CommandAllocator> = (0..FRAME_COUNT)
+            .into_iter()
+            .map(|_| device.create_command_allocator(list_type))
+            .collect();
+
+        let fence = device.create_fence(0);
+        let fence_event = dx12::Event::create(false, false);
+
+        (
+            factory4,
+            device,
+            command_allocators,
+            command_queue,
+            fence,
+            fence_event,
+        )
+    }
+
+    unsafe fn create_graphics_pipeline_dependencies(
+        device: dx12::Device,
+        width: u32,
+        height: u32,
+        wnd: &window::Window,
+        factory4: dx12::Factory4,
+        command_queue: dx12::CommandQueue,
+    ) -> (dx12::SwapChain3, dx12::DescriptorHeap, Vec<dx12::Resource>) {
+        // create swapchain
+        let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
+            Width: width,
+            Height: height,
+            AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_IGNORE,
+            BufferCount: FRAME_COUNT,
+            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
+            Flags: 0,
+            BufferUsage: dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Scaling: dxgi1_2::DXGI_SCALING_STRETCH,
+            Stereo: winapi::shared::minwindef::FALSE,
+            SwapEffect: dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD,
+        };
+
+        // disable full screen transitions
+        // winapi does not have DXGI_MWA_NO_ALT_ENTER?
+        factory4.0.MakeWindowAssociation(wnd.hwnd, 1);
+
+        let swap_chain3 = factory4.create_swapchain_for_hwnd(
+            command_queue.clone(),
+            wnd.hwnd.clone(),
+            swapchain_desc,
+        );
+
+        // create graphics descriptor heap
+        let rtv_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+            NumDescriptors: FRAME_COUNT,
+            Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+            NodeMask: 0,
+        };
+        let rtv_descriptor_heap = device.create_descriptor_heap(&rtv_descriptor_heap_desc);
+
+        let mut render_targets: Vec<dx12::Resource> = Vec::new();
+        for ix in 0..FRAME_COUNT {
+            let render_target_resource = swap_chain3.get_buffer(ix);
+
+            device.create_render_target_view(
+                render_target_resource.clone(),
+                ptr::null(),
+                rtv_descriptor_heap.get_cpu_descriptor_handle_at_offset(ix),
+            );
+
+            render_targets.push(render_target_resource.clone());
+        }
+
+        (swap_chain3, rtv_descriptor_heap, render_targets)
+    }
+
+    unsafe fn create_compute_pipeline_dependencies(
+        device: dx12::Device,
+        width: u32,
+        height: u32,
+        num_circles: u32,
+        num_tiles_x: u32,
+        num_tiles_y: u32,
+        tile_size: u32,
+        bbox_data: Vec<u8>,
+        color_data: Vec<u8>,
+    ) -> (
+        dx12::DescriptorHeap,
+        dx12::Resource,
+        dx12::Resource,
+        dx12::Resource,
+        dx12::Resource,
+        dx12::Resource,
+    ) {
         // create compute resource descriptor heap
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: 4,
+            NumDescriptors: 5,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
-        // create num_circles buffer
-        println!("creating num_circles buffer resource...");
-        let num_circles_buffer_stride = mem::size_of::<u32>();
-        let num_circles_buffer_size = num_circles_buffer_stride * 1;
+        // create constants buffer
+        let constants = [num_circles, tile_size];
+        let constant_buffer_stride = mem::size_of::<u32>();
+        let constant_buffer_size = constant_buffer_stride * constants.len();
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
         let padded_size_in_bytes: u64 = 256;
-        let num_circles_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
+        let constants_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
             Width: padded_size_in_bytes as u64,
             Height: 1,
@@ -443,7 +580,7 @@ impl GpuState {
             Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
             ..mem::zeroed()
         };
-        let num_circles_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        let constants_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -453,23 +590,21 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let num_circles_buffer = device.create_committed_resource(
-            &num_circles_buffer_heap_properties,
+        let constants_buffer = device.create_committed_resource(
+            &constants_buffer_heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &num_circles_buffer_resource_description,
+            &constants_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        num_circles_buffer
-            .upload_data_to_resource(256, &num_circles);
+        constants_buffer.upload_data_to_resource(256, constants.as_ptr());
         device.create_constant_buffer_view(
-            num_circles_buffer.clone(),
+            constants_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(0),
             padded_size_in_bytes as u32,
         );
 
-        println!("creating circle bbox buffer resource...");
         // create circle bbox buffer
         let circle_bbox_buffer_size_in_bytes = bbox_data.len();
         let circle_bbox_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
@@ -521,7 +656,6 @@ impl GpuState {
             bbox_data.len() as u32,
         );
 
-        println!("creating circle color buffer resource...");
         // create circle color buffer
         let circle_color_buffer_size_in_bytes = color_data.len();
         let circle_color_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
@@ -573,10 +707,71 @@ impl GpuState {
             color_data.len() as u32,
         );
 
-        println!("creating intermediate target resource...");
+        println!("creating per tile command list resource...");
+        // create per tile command list resource
+        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
+        let per_tile_command_list_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let per_tile_command_list_buffer_size =
+            (mem::size_of::<u32>() as u64) * ((num_circles * num_tiles_x * num_tiles_y) as u64);
+        println!("{}", per_tile_command_list_buffer_size);
+        panic!("stop");
+        assert!(
+            per_tile_command_list_buffer_size < (std::u32::MAX as u64),
+            "per_tile_command_list_buffer_size >= std::u32::MAX!"
+        );
+        let per_tile_command_list_resource_desc = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: per_tile_command_list_buffer_size,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            Format: winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            //essentially we're letting the adapter decide the layout
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+            ..mem::zeroed()
+        };
+        let mut per_tile_command_lists = device.create_committed_resource(
+            &per_tile_command_list_heap_properties,
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &per_tile_command_list_resource_desc,
+            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            ptr::null(),
+        );
+        //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
+        device.create_byte_addressed_buffer_unordered_access_view(
+            per_tile_command_lists.clone(),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(3),
+            0,
+            per_tile_command_list_buffer_size as u32,
+        );
+
         // create intermediate target resource
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
-        let compute_resource_desc = d3d12::D3D12_RESOURCE_DESC {
+        let intermediate_target_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let intermediate_target_resource_desc = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
             //TODO: what alignment should be chosen?
             Alignment: 0,
@@ -596,171 +791,148 @@ impl GpuState {
         };
         let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
-        let compute_target_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let mut compute_target = device.create_committed_resource(
-            &compute_target_heap_properties,
+        let mut intermediate_target = device.create_committed_resource(
+            &intermediate_target_heap_properties,
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &compute_resource_desc,
+            &intermediate_target_resource_desc,
             d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             ptr::null(),
         );
         device.create_unordered_access_view(
-            compute_target.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(3),
+            intermediate_target.clone(),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(4),
         );
-
-        // create swapchain
-        println!("creating swapchain...");
-        let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
-            Width: width,
-            Height: height,
-            AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_IGNORE,
-            BufferCount: FRAME_COUNT,
-            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-            Flags: 0,
-            BufferUsage: dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Scaling: dxgi1_2::DXGI_SCALING_STRETCH,
-            Stereo: winapi::shared::minwindef::FALSE,
-            SwapEffect: dxgi::DXGI_SWAP_EFFECT_FLIP_DISCARD,
-        };
-
-        let swap_chain3 = factory4.create_swapchain_for_hwnd(
-            command_queue.clone(),
-            wnd.hwnd.clone(),
-            swapchain_desc,
-        );
-
-        //let swap_chain3 = swap_chain1.cast_into_swap_chain3();
-        // disable full screen transitions
-        // winapi does not have DXGI_MWA_NO_ALT_ENTER?
-        factory4.0.MakeWindowAssociation(wnd.hwnd, 1);
-
-        // create graphics descriptor heap
-        println!("creating graphics descriptor heap...");
-        let rtv_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
-            Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-            NumDescriptors: FRAME_COUNT,
-            Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-            NodeMask: 0,
-        };
-        let rtv_descriptor_heap = device.create_descriptor_heap(&rtv_descriptor_heap_desc);
-
-        println!("creating render target views and command allocators for frames...");
-        let mut render_targets: Vec<dx12::Resource> = Vec::new();
-        let mut command_allocators: Vec<dx12::CommandAllocator> = Vec::new();
-        for ix in 0..FRAME_COUNT {
-            let render_target_resource = swap_chain3.get_buffer(ix);
-
-            device.create_render_target_view(
-                render_target_resource.clone(),
-                ptr::null(),
-                rtv_descriptor_heap.get_cpu_descriptor_handle_at_offset(ix),
-            );
-
-            render_targets.push(render_target_resource.clone());
-
-            command_allocators.push(device.create_command_allocator(list_type));
-        }
-
-        println!("creating fence...");
-        let fence = device.create_fence(0);
 
         (
-            swap_chain3,
-            device,
-            num_circles_buffer,
+            compute_descriptor_heap,
+            constants_buffer,
             circle_bbox_buffer,
             circle_color_buffer,
-            compute_target,
-            render_targets,
-            command_allocators,
-            command_queue,
-            compute_descriptor_heap,
-            rtv_descriptor_heap,
-            fence,
+            per_tile_command_lists,
+            intermediate_target,
         )
     }
 
-    unsafe fn create_compute_pipeline_state(
+    unsafe fn create_compute_pipeline_states(
         device: &dx12::Device,
         shader_path: &Path,
         shader_compile_flags: minwindef::DWORD,
-        compute_entry: String,
-    ) -> (dx12::RootSignature, dx12::PipelineState) {
-        println!("creating compute root signature...");
-        // compute root signature
-        let compute_cbv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        per_tile_command_lists_entry: String,
+        paint_entry: String,
+    ) -> (
+        dx12::RootSignature,
+        dx12::PipelineState,
+        dx12::RootSignature,
+        dx12::PipelineState,
+    ) {
+        // descriptor_ranges
+        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: 0,
             ..mem::zeroed()
         };
-        let compute_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 2,
             OffsetInDescriptorsFromTableStart: 1,
             ..mem::zeroed()
         };
-        let compute_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: 3,
+            BaseShaderRegister: 0,
             ..mem::zeroed()
         };
-        let descriptor_ranges = [compute_cbv_descriptor_range, compute_srv_descriptor_range, compute_uav_descriptor_range];
-        let compute_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
-            NumDescriptorRanges: descriptor_ranges.len() as u32,
-            pDescriptorRanges: descriptor_ranges.as_ptr() as *const _,
+        let intermediate_target_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: 4,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
         };
-        let mut compute_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+
+        let per_tile_command_lists_descriptor_ranges = [
+            constants_descriptor_range,
+            objects_descriptor_range,
+            per_tile_command_lists_descriptor_range,
+        ];
+        let per_tile_command_lists_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: per_tile_command_lists_descriptor_ranges.len() as u32,
+            pDescriptorRanges: per_tile_command_lists_descriptor_ranges.as_ptr() as *const _,
+        };
+        let mut per_tile_command_lists_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
             ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
             ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
             ..mem::zeroed()
         };
-        *compute_root_parameter.u.DescriptorTable_mut() = compute_descriptor_table;
-        let compute_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+        *per_tile_command_lists_root_parameter
+            .u
+            .DescriptorTable_mut() = per_tile_command_lists_descriptor_table;
+        let per_tile_command_lists_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
             NumParameters: 1,
-            pParameters: &compute_root_parameter as *const _,
+            pParameters: &per_tile_command_lists_root_parameter as *const _,
             NumStaticSamplers: 0,
             pStaticSamplers: ptr::null(),
             Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
         };
         let blob = dx12::RootSignature::serialize_description(
-            &compute_root_signature_desc,
+            &per_tile_command_lists_root_signature_desc,
             d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
         );
-        let compute_root_signature = device.create_root_signature(0, blob);
+        let per_tile_command_lists_root_signature = device.create_root_signature(0, blob);
 
-        // load compute shader
-        println!("compiling compute shader code...");
-//        dx12::ShaderByteCode::compile(
-//            shader_code,
-//            String::from("cs_5_1"),
-//            compute_entry,
-//            shader_compile_flags,
-//        );
+        let paint_descriptor_ranges = [
+            constants_descriptor_range,
+            objects_descriptor_range,
+            intermediate_target_descriptor_range,
+        ];
+        let paint_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: paint_descriptor_ranges.len() as u32,
+            pDescriptorRanges: paint_descriptor_ranges.as_ptr() as *const _,
+        };
+        let mut paint_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
+            ..mem::zeroed()
+        };
+        *paint_root_parameter.u.DescriptorTable_mut() = paint_descriptor_table;
+        let paint_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+            NumParameters: 1,
+            pParameters: &paint_root_parameter as *const _,
+            NumStaticSamplers: 0,
+            pStaticSamplers: ptr::null(),
+            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
+        };
+        let blob = dx12::RootSignature::serialize_description(
+            &paint_root_signature_desc,
+            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
+        );
+        let paint_root_signature = device.create_root_signature(0, blob);
+
+        // load compute shaders
         let compute_target = String::from("cs_5_1");
-        let compute_shader_blob = dx12::ShaderByteCode::compile_from_file(shader_path, compute_target, compute_entry, shader_compile_flags);
-        let compute_shader_bytecode = dx12::ShaderByteCode::from_blob(compute_shader_blob);
+        let per_tile_command_lists_shader_blob = dx12::ShaderByteCode::compile_from_file(
+            shader_path,
+            compute_target.clone(),
+            per_tile_command_lists_entry,
+            shader_compile_flags,
+        );
+        let per_tile_command_lists_shader_bytecode =
+            dx12::ShaderByteCode::from_blob(per_tile_command_lists_shader_blob);
+        let paint_shader_blob = dx12::ShaderByteCode::compile_from_file(
+            shader_path,
+            compute_target.clone(),
+            paint_entry,
+            shader_compile_flags,
+        );
+        let paint_shader_bytecode = dx12::ShaderByteCode::from_blob(paint_shader_blob);
 
-        // create compute pipeline state
-        println!("creating compute pipeline state...");
-        let compute_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
-            pRootSignature: compute_root_signature.0.as_raw(),
-            CS: compute_shader_bytecode.bytecode,
+        // create compute pipeline states
+        let per_tile_command_lists_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
+            pRootSignature: per_tile_command_lists_root_signature.0.as_raw(),
+            CS: per_tile_command_lists_shader_bytecode.bytecode,
             NodeMask: 0,
             CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
                 pCachedBlob: ptr::null(),
@@ -768,9 +940,27 @@ impl GpuState {
             },
             Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
         };
-        let compute_pipeline_state = device.create_compute_pipeline_state(&compute_ps_desc);
+        let per_tile_command_lists_pipeline_state =
+            device.create_compute_pipeline_state(&per_tile_command_lists_ps_desc);
 
-        (compute_root_signature, compute_pipeline_state)
+        let paint_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
+            pRootSignature: paint_root_signature.0.as_raw(),
+            CS: paint_shader_bytecode.bytecode,
+            NodeMask: 0,
+            CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
+                pCachedBlob: ptr::null(),
+                CachedBlobSizeInBytes: 0,
+            },
+            Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
+        };
+        let paint_pipeline_state = device.create_compute_pipeline_state(&paint_ps_desc);
+
+        (
+            per_tile_command_lists_root_signature,
+            per_tile_command_lists_pipeline_state,
+            paint_root_signature,
+            paint_pipeline_state,
+        )
     }
 
     unsafe fn create_graphics_pipeline_state(
@@ -864,13 +1054,23 @@ impl GpuState {
         // load graphics shaders from byte string
         println!("compiling vertex shader code...");
         let vertex_shader_target = String::from("vs_5_1");
-        let graphics_vertex_shader_blob = dx12::ShaderByteCode::compile_from_file(shader_path, vertex_shader_target, vertex_entry, shader_compile_flags);
+        let graphics_vertex_shader_blob = dx12::ShaderByteCode::compile_from_file(
+            shader_path,
+            vertex_shader_target,
+            vertex_entry,
+            shader_compile_flags,
+        );
         let graphics_vertex_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
 
         println!("compiling fragment shader code...");
         let fragment_shader_target = String::from("ps_5_1");
-        let graphics_fragment_shader_blob = dx12::ShaderByteCode::compile_from_file(shader_path, fragment_shader_target, fragment_entry, shader_compile_flags);
+        let graphics_fragment_shader_blob = dx12::ShaderByteCode::compile_from_file(
+            shader_path,
+            fragment_shader_target,
+            fragment_entry,
+            shader_compile_flags,
+        );
         let graphics_fragment_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_fragment_shader_blob);
 
@@ -972,12 +1172,15 @@ impl GpuState {
     unsafe fn create_pipeline_states(
         device: &dx12::Device,
         shader_path: &Path,
-        compute_entry: String,
+        per_tile_command_lists_entry: String,
+        paint_entry: String,
         vertex_entry: String,
         fragment_entry: String,
         command_allocators: &Vec<dx12::CommandAllocator>,
         screen_quad: Quad,
     ) -> (
+        dx12::RootSignature,
+        dx12::PipelineState,
         dx12::RootSignature,
         dx12::PipelineState,
         dx12::RootSignature,
@@ -993,13 +1196,18 @@ impl GpuState {
         let shader_compile_flags: minwindef::DWORD = winapi::um::d3dcompiler::D3DCOMPILE_DEBUG
             | winapi::um::d3dcompiler::D3DCOMPILE_SKIP_OPTIMIZATION;
 
-        let (compute_root_signature, compute_pipeline_state) =
-            GpuState::create_compute_pipeline_state(
-                device,
-                shader_path,
-                shader_compile_flags,
-                compute_entry,
-            );
+        let (
+            per_tile_command_lists_root_signature,
+            per_tile_command_lists_pipeline_state,
+            paint_root_signature,
+            paint_pipeline_state,
+        ) = GpuState::create_compute_pipeline_states(
+            device,
+            shader_path,
+            shader_compile_flags,
+            per_tile_command_lists_entry,
+            paint_entry,
+        );
 
         let (graphics_root_signature, graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
             GpuState::create_graphics_pipeline_state(
@@ -1011,20 +1219,21 @@ impl GpuState {
                 screen_quad,
             );
 
-        println!("creating command list...");
         // create command list
         let command_list = device.create_graphics_command_list(
             d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT,
             command_allocators[0].clone(),
-            compute_pipeline_state.clone(),
+            per_tile_command_lists_pipeline_state.clone(),
             0,
         );
 
         command_list.close();
 
         (
-            compute_root_signature,
-            compute_pipeline_state,
+            per_tile_command_lists_root_signature,
+            per_tile_command_lists_pipeline_state,
+            paint_root_signature,
+            paint_pipeline_state,
             graphics_root_signature,
             graphics_pipeline_state,
             vertex_buffer,

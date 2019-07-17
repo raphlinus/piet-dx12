@@ -1,14 +1,14 @@
 extern crate winapi;
 extern crate wio;
 
-use std::{ffi, mem, ptr, path::{Path}};
+use crate::error;
+use crate::error::error_if_failed_else_unit;
+use std::os::windows::ffi::OsStrExt;
+use std::{ffi, mem, path::Path, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
-use crate::error;
-use crate::error::error_if_failed_else_unit;
-use std::os::windows::ffi::OsStrExt;
 
 // everything is ripped from d3d12-rs, but wio::com::ComPtr, and winapi are used more directly
 
@@ -243,8 +243,15 @@ impl SwapChain3 {
 
 impl Blob {
     pub unsafe fn print_to_console(blob: Blob) {
-        let blob_as_string = ffi::CStr::from_ptr(blob.0.as_raw() as *const _).to_string_lossy().into_owned();
-        println!("{}", blob_as_string);
+        println!("==SHADER COMPILE MESSAGES==");
+        let message = {
+            let pointer = blob.0.GetBufferPointer();
+            let size = blob.0.GetBufferSize();
+            let slice = std::slice::from_raw_parts(pointer as *const u8, size as usize);
+            String::from_utf8_lossy(slice).into_owned()
+        };
+        println!("{}", message);
+        println!("===========================");
     }
 }
 
@@ -459,6 +466,36 @@ impl Device {
         GraphicsCommandList(ComPtr::from_raw(command_list))
     }
 
+    pub unsafe fn create_byte_addressed_buffer_unordered_access_view(
+        &self,
+        resource: Resource,
+        descriptor: CpuDescriptor,
+        first_element: u64,
+        num_elements: u32,
+    ) {
+        // shouldn't flags be dxgiformat::DXGI_FORMAT_R32_TYPELESS?
+        let mut uav_desc = d3d12::D3D12_UNORDERED_ACCESS_VIEW_DESC {
+            Format: dxgiformat::DXGI_FORMAT_UNKNOWN,
+            ViewDimension: d3d12::D3D12_UAV_DIMENSION_BUFFER,
+            ..mem::zeroed()
+        };
+        *uav_desc.u.Buffer_mut() = d3d12::D3D12_BUFFER_UAV {
+            FirstElement: first_element,
+            NumElements: num_elements,
+            // shouldn't StructureByteStride be 0?
+            StructureByteStride: 1,
+            CounterOffsetInBytes: 0,
+            // shouldn't flags be d3d12::D3D12_BUFFER_SRV_FLAG_RAW?
+            Flags: d3d12::D3D12_BUFFER_UAV_FLAG_NONE,
+        };
+        self.0.CreateUnorderedAccessView(
+            resource.0.as_raw(),
+            ptr::null_mut(),
+            &uav_desc as *const _,
+            descriptor,
+        )
+    }
+
     pub unsafe fn create_unordered_access_view(
         &self,
         resource: Resource,
@@ -494,6 +531,7 @@ impl Device {
         num_elements: u32,
     ) {
         let mut srv_desc = d3d12::D3D12_SHADER_RESOURCE_VIEW_DESC {
+            // shouldn't flags be dxgiformat::DXGI_FORMAT_R32_TYPELESS?
             Format: dxgiformat::DXGI_FORMAT_UNKNOWN,
             ViewDimension: d3d12::D3D12_SRV_DIMENSION_BUFFER,
             Shader4ComponentMapping: 0x1688,
@@ -502,7 +540,9 @@ impl Device {
         *srv_desc.u.Buffer_mut() = d3d12::D3D12_BUFFER_SRV {
             FirstElement: first_element,
             NumElements: num_elements,
+            // shouldn't StructureByteStride be 0?
             StructureByteStride: 1,
+            // shouldn't flags be d3d12::D3D12_BUFFER_SRV_FLAG_RAW?
             Flags: d3d12::D3D12_BUFFER_SRV_FLAG_NONE,
         };
         self.0
@@ -705,7 +745,8 @@ impl ShaderByteCode {
         let mut shader = ptr::null_mut();
         let mut error = ptr::null_mut();
 
-        let target = ffi::CString::new(target).expect("could not convert target string into C string");
+        let target =
+            ffi::CString::new(target).expect("could not convert target string into C string");
         let entry = ffi::CString::new(entry).expect("could not convert entry string into C string");
         let encoded_file_path: Vec<u16> = file_path.as_os_str().encode_wide().collect();
         let hresult = winapi::um::d3dcompiler::D3DCompileFromFile(
@@ -720,8 +761,11 @@ impl ShaderByteCode {
             &mut error as *mut _ as *mut _,
         );
 
-        let error_blob = Blob(ComPtr::from_raw(error));
-        Blob::print_to_console(error_blob.clone());
+        #[cfg(debug_assertions)]
+        {
+            let error_blob = Blob(ComPtr::from_raw(error));
+            Blob::print_to_console(error_blob.clone());
+        }
 
         error::error_if_failed_else_unit(hresult).expect("shader compilation failed");
 
@@ -772,8 +816,10 @@ impl GraphicsCommandList {
     }
 
     pub unsafe fn reset(&self, allocator: CommandAllocator, initial_pso: PipelineState) {
-        error::error_if_failed_else_unit(self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw()))
-            .expect("could not reset command list");
+        error::error_if_failed_else_unit(
+            self.0.Reset(allocator.0.as_raw(), initial_pso.0.as_raw()),
+        )
+        .expect("could not reset command list");
     }
 
     pub unsafe fn set_compute_root_signature(&self, signature: RootSignature) {

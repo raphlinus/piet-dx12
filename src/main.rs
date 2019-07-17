@@ -17,7 +17,8 @@ fn main() {
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
-            String::from("CSMain"),
+            String::from("build_per_tile_command_list"),
+            String::from("paint_objects"),
             String::from("VSMain"),
             String::from("PSMain"),
             16,
