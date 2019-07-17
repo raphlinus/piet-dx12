@@ -123,6 +123,8 @@ impl GpuState {
         let height = wnd.get_height();
         let num_circles = 1000;
         let (bbox_data, color_data) = scene::create_random_scene(width, height, num_circles);
+//        let num_circles = 1;
+//        let (bbox_data, color_data) = scene::create_constant_scene();
 
         let f_tile_size = tile_size as f32;
         let f_width = width as f32;
@@ -277,7 +279,7 @@ impl GpuState {
         );
 
         self.command_list
-            .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
+            .dispatch(self.num_tiles_x*self.num_tiles_x, 1, 1);
 
         // need to ensure all writes to per_tile_command_lists are complete before any reads are done
         let synchronize_wrt_per_tile_command_lists =
@@ -547,7 +549,7 @@ impl GpuState {
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
         // create constants buffer
-        let constants = [num_circles, tile_size];
+        let constants = [num_circles, tile_size, num_tiles_x, num_tiles_y];
         let constant_buffer_stride = mem::size_of::<u32>();
         let constant_buffer_size = constant_buffer_stride * constants.len();
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -835,7 +837,7 @@ impl GpuState {
         let intermediate_target_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 3,
+            OffsetInDescriptorsFromTableStart: 4,
             BaseShaderRegister: 1,
             ..mem::zeroed()
         };
@@ -873,6 +875,7 @@ impl GpuState {
         let paint_descriptor_ranges = [
             constants_descriptor_range,
             objects_descriptor_range,
+            per_tile_command_lists_descriptor_range,
             intermediate_target_descriptor_range,
         ];
         let paint_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
@@ -970,6 +973,7 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: 0,
+            BaseShaderRegister: 1,
             ..mem::zeroed()
         };
         let frag_shader_srv_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {

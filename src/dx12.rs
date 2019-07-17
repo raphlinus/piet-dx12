@@ -743,7 +743,7 @@ impl ShaderByteCode {
         flags: minwindef::DWORD,
     ) -> Blob {
         let mut shader = ptr::null_mut();
-        let mut error = ptr::null_mut();
+        let mut error: *mut d3dcommon::ID3DBlob = ptr::null_mut();
 
         let target =
             ffi::CString::new(target).expect("could not convert target string into C string");
@@ -763,8 +763,10 @@ impl ShaderByteCode {
 
         #[cfg(debug_assertions)]
         {
-            let error_blob = Blob(ComPtr::from_raw(error));
-            Blob::print_to_console(error_blob.clone());
+            if (!error.is_null()) {
+                let error_blob = Blob(ComPtr::from_raw(error));
+                Blob::print_to_console(error_blob.clone());
+            }
         }
 
         error::error_if_failed_else_unit(hresult).expect("shader compilation failed");

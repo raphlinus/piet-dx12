@@ -48,9 +48,6 @@ pub unsafe fn create_random_scene(
 }
 
 pub unsafe fn create_constant_scene(
-    screen_width: u32,
-    screen_height: u32,
-    num_circles: u32,
 ) -> (Vec<u8>, Vec<u8>) {
     let mut rng = rand::thread_rng();
 
@@ -58,8 +55,8 @@ pub unsafe fn create_constant_scene(
     let mut color_data: Vec<u8> = Vec::new();
 
     let diameter: u16 = 100;
-    let bbox_min_x: u16 = 100;
-    let bbox_min_y: u16 = 100;
+    let bbox_min_x: u16 = 0;
+    let bbox_min_y: u16 = 0;
 
     // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
     bbox_data

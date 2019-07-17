@@ -4,6 +4,8 @@ cbuffer Constants : register(b0)
 {
 	uint num_circles;
 	uint tile_size;
+    uint num_tiles_x;
+    uint num_tiles_y;
 };
 
 ByteAddressBuffer circle_bbox_buffer : register(t0);
@@ -280,46 +282,68 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     return result;
 }
 
-uint4 generate_tile_bbox(uint x, uint y) {
-    uint left = x*tile_size;
-    uint top = y*tile_size;
-    uint bot = top + tile_size;
+uint4 generate_tile_bbox(uint tile_ix) {
+    uint tile_x_ix = round(fmod(tile_ix, num_tiles_x));
+    uint tile_y_ix = tile_ix/num_tiles_x;
+
+    uint left = tile_size*tile_x_ix;
+    uint top = tile_size*tile_y_ix;
     uint right = left + tile_size;
+    uint bot = top + tile_size;
 
     uint4 result = {left, right, top, bot};
     return result;
 }
 
-bool do_tiles_intersect(uint4 bbox0, uint4 bbox1) {
-    if (bbox1[0] >= bbox0[1] && bbox1[0] >= bbox0[1]) {
-        return 1;
+bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
+
+    uint right1 = bbox1[1];
+    uint left0 = bbox0[0];
+    uint left1 = bbox1[0];
+    uint right0 = bbox0[1];
+    
+    if (right1 <= left0 || left1 >= right0) {
+        return 0;
     }
 
-    return 0;
+    uint bot1 = bbox1[3];
+    uint top0 = bbox0[2];
+    uint top1 = bbox1[2];
+    uint bot0 = bbox0[3];
+
+    if (bot1 <= top0 || top1 >= bot0) {
+        return 0;
+    }
+
+    return 1;
 }
 
 uint pack_command(uint tile_ix) {
     return tile_ix;
 }
 
-[numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
+[numthreads(~TILE_SIZE_SQUARED~, 1, 1)]
 void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
-    uint tile_ix = DTid.x * DTid.y;
+    uint tile_ix = DTid.x;
     uint command_address = num_circles*tile_ix*4;
-    uint4 tile_bbox = generate_tile_bbox(DTid.x, DTid.y);
+    uint next_tile_command_start_address = command_address + num_circles*4;
+    uint num_commands = 0;
+    uint4 tile_bbox = generate_tile_bbox(tile_ix);
 
     for (uint i = 0; i < num_circles; i++) {
         uint4 object_bbox = load_bbox_at_index(i);
-        bool hit = do_tiles_intersect(object_bbox, tile_bbox);
+        bool hit = do_bbox_interiors_intersect(object_bbox, tile_bbox);
 
         if (hit) {
-            per_tile_command_list.Store(command_address, pack_command(tile_ix));
+            per_tile_command_list.Store(command_address, pack_command(i));
             command_address += 4;
         }
     }
 
-    // mark end of command list for this tile
-    per_tile_command_list.Store(command_address, 4294967295);
+    // mark end of command list for this tile, if command list does not take up entire allocated space
+    if (command_address < next_tile_command_start_address) {
+        per_tile_command_list.Store(command_address, 4294967295);
+    }
 }
 
 uint unpack_command(uint command_address) {
@@ -327,16 +351,15 @@ uint unpack_command(uint command_address) {
 }
 
 [numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
-void paint_objects(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
+void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
 
     uint2 pixel_pos = DTid.xy;
 
-    uint tile_x_index = round(fmod(pixel_pos.x, tile_size));
-    uint tile_y_index = round(fmod(pixel_pos.y, tile_size));
-    uint tile_index = tile_x_index*tile_y_index;
-    uint command_address = num_circles*tile_index*4;
+    // // uint casting is same as flooring (in general, casting is round to zero)
+    uint tile_ix = Gid.y*num_tiles_x + Gid.x;
+    uint command_address = num_circles*tile_ix*4;
 
     for (uint i = 0; i < num_circles; i++) {
         // do we want object index, bbox loading, color loading etc. to be in thread group shared memory?
@@ -353,35 +376,40 @@ void paint_objects(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
                 float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
                 bg = blend_pd_over(bg, fg);
             }
+            //float4 fg = {0.5f, 0.5f, 0.5f, 1.0f};
+            //bg = blend_pd_over(bg, fg);
         }
 
         command_address += 4;
     }
 
-//    // boolean value display
-//    bool test = (value == 6553800);
-//    uint4 test_bbox = {100, 200, 100, 200};
-//    float4 test_success_color = {0.0f, 1.0f, 0.0f, 1.0f};
-//    float4 test_fail_color = {1.0f, 0.0f, 0.0f, 1.0f};
-//
-//    if (test) {
-//        fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_success_color);
-//    } else {
-//        fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_fail_color);
-//    }
+    // // boolean value display
+    // bool test = (value == 6553800);
+    // uint4 test_bbox = {100, 200, 100, 200};
+    // float4 test_success_color = {0.0f, 1.0f, 0.0f, 1.0f};
+    // float4 test_fail_color = {1.0f, 0.0f, 0.0f, 1.0f};
 
-//    // unsigned integer value display
-//    uint2 rect_origin = {800, 300};
-//    uint2 rect_size = {50, 10};
-//    fg.r = 1.0f;
-//    fg.g = 1.0f;
-//    fg.b = 1.0f;
-//    // should print out 6553800
-//    fg.a = number_shader(color.a, pixel_pos, rect_origin, rect_size);
-//    bg = blend_pd_over(bg, fg);
+    // if (test) {
+    //     fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_success_color);
+    // } else {
+    //     fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_fail_color);
+    // }
+
+    // unsigned integer value display
+    // uint2 rect_origin = {800, 300};
+    // uint2 rect_size = {50, 10};
+    // fg.r = 1.0f;
+    // fg.g = 1.0f;
+    // fg.b = 1.0f;
+    // // should print out 6553800
+    // uint4 bbox0 = {0, 100, 0, 100};
+    // uint4 bbox1 = generate_tile_bbox(66);
+    // uint intersection_result = do_bbox_interiors_intersect(bbox0, bbox1);
+    // fg.a = number_shader(bbox1[2], pixel_pos, rect_origin, rect_size);
+    // bg = blend_pd_over(bg, fg);
 
     canvas[DTid.xy] = bg;
-}
+    }
 
 float4 VSMain(float4 position: POSITION) : SV_Position
 {
