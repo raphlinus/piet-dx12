@@ -258,12 +258,9 @@ impl GpuState {
     }
 
     unsafe fn populate_command_list(&mut self) {
-        println!("  populating command list...");
-        println!("      resetting relevant command allocator...");
         self.command_allocators[self.frame_index].reset();
 
         // per tile command list generation call
-        println!("      resetting command list...");
         self.command_list.reset(
             self.command_allocators[self.frame_index].clone(),
             self.per_tile_command_lists_pipeline_state.clone(),
@@ -311,13 +308,10 @@ impl GpuState {
             .set_resource_barrier(vec![synchronize_wrt_intermediate_target]);
 
         // graphics pipeline call
-        println!("      setting command list pipeline state to graphics...");
         self.command_list
             .set_pipeline_state(self.graphics_pipeline_state.clone());
-        println!("      command list: set graphics root signature...");
         self.command_list
             .set_graphics_root_signature(self.graphics_root_signature.clone());
-        println!("      command list: set viewport...");
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_graphics_root_descriptor_table(
@@ -326,24 +320,20 @@ impl GpuState {
                 .get_gpu_descriptor_handle_at_offset(4),
         );
         self.command_list.set_viewport(&self.viewport);
-        println!("      command list: set scissor rect...");
         self.command_list.set_scissor_rect(&self.scissor_rect);
         let transition_render_target_from_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
         );
-        println!("      command list: set pre-draw resource barrier...");
         self.command_list
             .set_resource_barrier(vec![transition_render_target_from_present]);
         let mut rt_descriptor = self
             .rtv_descriptor_heap
             .get_cpu_descriptor_handle_at_offset(self.frame_index as u32);
-        println!("      command list: set render target...");
         self.command_list.set_render_target(rt_descriptor);
 
         // Record drawing commands.
-        println!("      command list: record draw commands...");
         self.command_list
             .clear_render_target_view(rt_descriptor, &CLEAR_COLOR);
         self.command_list
@@ -357,16 +347,12 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
         );
-        println!("      command list: set post-draw resource barrier...");
         self.command_list
             .set_resource_barrier(vec![transition_render_target_to_present]);
-
-        println!("      command list: close...");
         self.command_list.close();
     }
 
     unsafe fn execute_command_list(&mut self) {
-        println!("  executing command list...");
         self.command_queue
             .execute_command_lists(1, &[self.command_list.as_raw_list()]);
     }
@@ -707,7 +693,6 @@ impl GpuState {
             color_data.len() as u32,
         );
 
-        println!("creating per tile command list resource...");
         // create per tile command list resource
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
         let per_tile_command_list_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
@@ -722,8 +707,8 @@ impl GpuState {
         };
         let per_tile_command_list_buffer_size =
             (mem::size_of::<u32>() as u64) * ((num_circles * num_tiles_x * num_tiles_y) as u64);
-        println!("{}", per_tile_command_list_buffer_size);
-        panic!("stop");
+//        println!("{}", per_tile_command_list_buffer_size);
+//        panic!("stop");
         assert!(
             per_tile_command_list_buffer_size < (std::u32::MAX as u64),
             "per_tile_command_list_buffer_size >= std::u32::MAX!"
@@ -976,7 +961,6 @@ impl GpuState {
         dx12::Resource,
         d3d12::D3D12_VERTEX_BUFFER_VIEW,
     ) {
-        println!("creating graphics root signature...");
         // create graphics root signature
         let frag_shader_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
@@ -1009,7 +993,6 @@ impl GpuState {
         let graphics_root_signature = device.create_root_signature(0, blob);
 
         // create vertex buffer
-        println!("creating vertex buffer...");
         let vertices = screen_quad.as_vertices();
         let vertex_buffer_stride = mem::size_of::<Vertex>();
         let vertex_buffer_size = vertex_buffer_stride * vertices.len();
@@ -1052,7 +1035,6 @@ impl GpuState {
         };
 
         // load graphics shaders from byte string
-        println!("compiling vertex shader code...");
         let vertex_shader_target = String::from("vs_5_1");
         let graphics_vertex_shader_blob = dx12::ShaderByteCode::compile_from_file(
             shader_path,
@@ -1063,7 +1045,6 @@ impl GpuState {
         let graphics_vertex_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
 
-        println!("compiling fragment shader code...");
         let fragment_shader_target = String::from("ps_5_1");
         let graphics_fragment_shader_blob = dx12::ShaderByteCode::compile_from_file(
             shader_path,
@@ -1158,7 +1139,6 @@ impl GpuState {
             },
             Flags: d3d12::D3D12_PIPELINE_STATE_FLAG_NONE,
         };
-        println!("creating graphics pipeline state...");
         let graphics_pipeline_state = device.create_graphics_pipeline_state(&graphics_ps_desc);
 
         (
