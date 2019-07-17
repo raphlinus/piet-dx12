@@ -830,10 +830,12 @@ impl GpuState {
             BaseShaderRegister: 0,
             ..mem::zeroed()
         };
+        // intermediate target is in a separate descriptor range from per_tile_command_lists
+        // thus OffsetInDescriptorsFromTableStart should be the same?
         let intermediate_target_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 4,
+            OffsetInDescriptorsFromTableStart: 3,
             BaseShaderRegister: 1,
             ..mem::zeroed()
         };
@@ -915,6 +917,7 @@ impl GpuState {
         let paint_shader_bytecode = dx12::ShaderByteCode::from_blob(paint_shader_blob);
 
         // create compute pipeline states
+        println!("creating per tile command lists ps...");
         let per_tile_command_lists_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: per_tile_command_lists_root_signature.0.as_raw(),
             CS: per_tile_command_lists_shader_bytecode.bytecode,
@@ -928,6 +931,7 @@ impl GpuState {
         let per_tile_command_lists_pipeline_state =
             device.create_compute_pipeline_state(&per_tile_command_lists_ps_desc);
 
+        println!("creating paint ps...");
         let paint_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: paint_root_signature.0.as_raw(),
             CS: paint_shader_bytecode.bytecode,

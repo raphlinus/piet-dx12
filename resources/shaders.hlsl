@@ -327,7 +327,7 @@ uint unpack_command(uint command_address) {
 }
 
 [numthreads(16, 16, 1)]
-uint paint_objects(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
+void paint_objects(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
 
