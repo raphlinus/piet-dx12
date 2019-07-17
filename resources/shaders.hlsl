@@ -3,6 +3,7 @@
 cbuffer Constants : register(b0)
 {
 	uint num_circles;
+	uint tile_size;
 };
 
 ByteAddressBuffer circle_bbox_buffer : register(t0);
@@ -256,11 +257,11 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     uint delta = size.x + 10;
 
     uint num_digits = 0;
-    double fnumber = number;
+    float fnumber = number;
     float result = 0.0;
 
     while (1) {
-        uint digit = round(fmod(fnumber, 10.0L));
+        uint digit = round(fmod(fnumber, 10.0f));
 
         result = digit_display_shader(digit, pixel_pos, display_origin, size);
 
@@ -268,7 +269,7 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
             break;
         }
 
-        fnumber = trunc(fnumber/10.0L);
+        fnumber = trunc(fnumber/10.0f);
         display_origin.x = display_origin.x - delta;
 
         if (fnumber == 0.0f) {
@@ -302,27 +303,27 @@ uint pack_command(uint tile_ix) {
 }
 
 [numthreads(16, 16, 1)]
-void build_per_tile_command_list(uint3 DTid.xy : SV_DispatchThreadID) {
+void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
     uint tile_ix = DTid.x * DTid.y;
     uint command_address = num_circles*tile_ix*4;
     uint4 tile_bbox = generate_tile_bbox(DTid.x, DTid.y);
 
     for (uint i = 0; i < num_circles; i++) {
-        uint4 bbox = load_bbox_at_index(i);
-        bool hit = do_tiles_intersect(pixel_pos, tile_bbox);
+        uint4 object_bbox = load_bbox_at_index(i);
+        bool hit = do_tiles_intersect(object_bbox, tile_bbox);
 
         if (hit) {
-            per_tile_command_list[tile_address] = pack_command(tile_ix);
+            per_tile_command_list.Store(command_address, pack_command(tile_ix));
             command_address += 4;
         }
     }
 
     // mark end of command list for this tile
-    per_tile_command_list[command_address] = 4294967295;
+    per_tile_command_list.Store(command_address, 4294967295);
 }
 
-uint unpack_command(command_address) {
-    return per_tile_command_list[command_address];
+uint unpack_command(uint command_address) {
+    return per_tile_command_list.Load(command_address);
 }
 
 [numthreads(16, 16, 1)]
@@ -332,8 +333,8 @@ void CSMain(uint3 DTid : SV_DispatchThreadID, uint tix : SV_GroupIndex) {
 
     uint2 pixel_pos = DTid.xy;
 
-    uint tile_x_index = round(fmod(pixel_pos.x/tile_size));
-    uint tile_y_index = round(fmod(pixel_pos.y/tile_size));
+    uint tile_x_index = round(fmod(pixel_pos.x, tile_size));
+    uint tile_y_index = round(fmod(pixel_pos.y, tile_size));
     uint tile_index = tile_x_index*tile_y_index;
     uint command_address = num_circles*tile_index*4;
 
