@@ -54,17 +54,24 @@ impl Quad {
 
 const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
-fn materialize_shader_code(ptcl_num_tiles_per_tg_x: u32, ptcl_num_tiles_per_tg_y: u32, paint_num_pixels_per_tg_x: u32, paint_num_pixels_per_tg_y: u32, shader_template_path: &Path, shader_path: &Path) {
+fn materialize_per_tile_command_list_kernel_code(ptcl_num_tiles_per_tg_x: u32, ptcl_num_tiles_per_tg_y: u32, shader_template_path: &Path, shader_path: &Path) {
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not read data from provided shader template path");
 
     let step1 = step0.replace("~PTCL_X~", &format!("{}", ptcl_num_tiles_per_tg_x));
     let step2 = step1.replace("~PTCL_Y~", &format!("{}", ptcl_num_tiles_per_tg_y));
-    let step3 = step2.replace("~P_X~", &format!("{}", paint_num_pixels_per_tg_x));
-    let step4 = step3.replace("~P_Y~", &format!("{}", paint_num_pixels_per_tg_y));
+    
+    std::fs::write(shader_path, step2).expect("shader template could not be materialized");
+}
 
+fn materialize_paint_kernel_code(paint_num_pixels_per_tg_x: u32, paint_num_pixels_per_tg_y: u32, shader_template_path: &Path, shader_path: &Path) {
+    let step0 = std::fs::read_to_string(shader_template_path)
+        .expect("could not read data from provided shader template path");
+    
+    let step1 = step0.replace("~P_X~", &format!("{}", paint_num_pixels_per_tg_x));
+    let step2 = step1.replace("~P_Y~", &format!("{}", paint_num_pixels_per_tg_y));
 
-    std::fs::write(shader_path, step4).expect("shader template could not be materialized");
+    std::fs::write(shader_path, step2).expect("shader template could not be materialized");
 }
 
 pub struct GpuState {
@@ -170,16 +177,27 @@ impl GpuState {
         );
 
         let shader_folder = Path::new("A:\\piet-dx12\\resources");
-        let shader_template_path = shader_folder.join(Path::new("shaders_template.hlsl"));
-        let shader_path = shader_folder.join(Path::new("shaders.hlsl"));
-        materialize_shader_code(
+
+        let ptcl_kernel_template_path = shader_folder.join(Path::new("ptcl_kernel_template.hlsl"));
+        let ptcl_kernel_path = shader_folder.join(Path::new("ptcl_kernel.hlsl"));
+        materialize_per_tile_command_list_kernel_code(
             per_tile_command_lists_num_tiles_per_tg_x, 
-            per_tile_command_lists_num_tiles_per_tg_y, 
-            paint_num_pixels_per_tg_x, 
-            paint_num_pixels_per_tg_y, 
-            &shader_template_path, 
-            &shader_path
+            per_tile_command_lists_num_tiles_per_tg_y,
+            &ptcl_kernel_template_path,
+            &ptcl_kernel_path,
         );
+
+        let paint_kernel_template_path = shader_folder.join(Path::new("paint_kernel_template.hlsl"));
+        let paint_kernel_path = shader_folder.join(Path::new("paint_kernel.hlsl"));
+        materialize_paint_kernel_code(
+            paint_num_pixels_per_tg_x,
+            paint_num_pixels_per_tg_y,
+            &paint_kernel_template_path,
+            &paint_kernel_path,
+        );
+
+        let vertex_shader_path = shader_folder.join(Path::new("vertex_shader.hlsl"));
+        let fragment_shader_path = shader_folder.join(Path::new("fragment_shader.hlsl"));
 
         println!("width: {}", width);
         println!("height: {}", height);
@@ -259,7 +277,10 @@ impl GpuState {
             command_list,
         ) = GpuState::create_pipeline_states(
             &device,
-            &shader_path,
+            &ptcl_kernel_path,
+            &paint_kernel_path,
+            &vertex_shader_path,
+            &fragment_shader_path,
             per_tile_command_lists_entry,
             paint_entry,
             vertex_entry,
@@ -860,7 +881,8 @@ impl GpuState {
 
     unsafe fn create_compute_pipeline_states(
         device: &dx12::Device,
-        shader_path: &Path,
+        ptcl_kernel_path: &Path,
+        paint_kernel_path: &Path,
         shader_compile_flags: minwindef::DWORD,
         per_tile_command_lists_entry: String,
         paint_entry: String,
@@ -961,16 +983,20 @@ impl GpuState {
 
         // load compute shaders
         let compute_target = String::from("cs_5_1");
+
+        println!("compiling per tile command lists shader...");
         let per_tile_command_lists_shader_blob = dx12::ShaderByteCode::compile_from_file(
-            shader_path,
+            ptcl_kernel_path,
             compute_target.clone(),
             per_tile_command_lists_entry,
             shader_compile_flags,
         );
         let per_tile_command_lists_shader_bytecode =
             dx12::ShaderByteCode::from_blob(per_tile_command_lists_shader_blob);
+
+        println!("compiling paint shader...");
         let paint_shader_blob = dx12::ShaderByteCode::compile_from_file(
-            shader_path,
+            paint_kernel_path,
             compute_target.clone(),
             paint_entry,
             shader_compile_flags,
@@ -978,7 +1004,6 @@ impl GpuState {
         let paint_shader_bytecode = dx12::ShaderByteCode::from_blob(paint_shader_blob);
 
         // create compute pipeline states
-        println!("creating per tile command lists ps...");
         let per_tile_command_lists_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: per_tile_command_lists_root_signature.0.as_raw(),
             CS: per_tile_command_lists_shader_bytecode.bytecode,
@@ -992,7 +1017,6 @@ impl GpuState {
         let per_tile_command_lists_pipeline_state =
             device.create_compute_pipeline_state(&per_tile_command_lists_ps_desc);
 
-        println!("creating paint ps...");
         let paint_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: paint_root_signature.0.as_raw(),
             CS: paint_shader_bytecode.bytecode,
@@ -1015,7 +1039,8 @@ impl GpuState {
 
     unsafe fn create_graphics_pipeline_state(
         device: &dx12::Device,
-        shader_path: &Path,
+        vertex_shader_path: &Path,
+        fragment_shader_path: &Path,
         shader_compile_flags: minwindef::DWORD,
         vertex_entry: String,
         fragment_entry: String,
@@ -1101,9 +1126,10 @@ impl GpuState {
         };
 
         // load graphics shaders from byte string
+        println!("compiling vertex shader...");
         let vertex_shader_target = String::from("vs_5_1");
         let graphics_vertex_shader_blob = dx12::ShaderByteCode::compile_from_file(
-            shader_path,
+            vertex_shader_path,
             vertex_shader_target,
             vertex_entry,
             shader_compile_flags,
@@ -1111,9 +1137,10 @@ impl GpuState {
         let graphics_vertex_shader_bytecode =
             dx12::ShaderByteCode::from_blob(graphics_vertex_shader_blob);
 
+        println!("compiling fragment shader...");
         let fragment_shader_target = String::from("ps_5_1");
         let graphics_fragment_shader_blob = dx12::ShaderByteCode::compile_from_file(
-            shader_path,
+            fragment_shader_path,
             fragment_shader_target,
             fragment_entry,
             shader_compile_flags,
@@ -1217,7 +1244,10 @@ impl GpuState {
 
     unsafe fn create_pipeline_states(
         device: &dx12::Device,
-        shader_path: &Path,
+        ptcl_kernel_path: &Path,
+        paint_kernel_path: &Path,
+        vertex_shader_path: &Path,
+        fragment_shader_path: &Path,
         per_tile_command_lists_entry: String,
         paint_entry: String,
         vertex_entry: String,
@@ -1249,7 +1279,8 @@ impl GpuState {
             paint_pipeline_state,
         ) = GpuState::create_compute_pipeline_states(
             device,
-            shader_path,
+            ptcl_kernel_path,
+            paint_kernel_path,
             shader_compile_flags,
             per_tile_command_lists_entry,
             paint_entry,
@@ -1258,7 +1289,8 @@ impl GpuState {
         let (graphics_root_signature, graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
             GpuState::create_graphics_pipeline_state(
                 device,
-                shader_path,
+                vertex_shader_path,
+                fragment_shader_path,
                 shader_compile_flags,
                 vertex_entry,
                 fragment_entry,

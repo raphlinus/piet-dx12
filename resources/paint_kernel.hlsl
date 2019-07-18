@@ -9,11 +9,6 @@ cbuffer Constants : register(b0)
 ByteAddressBuffer circle_bbox_buffer : register(t0);
 ByteAddressBuffer circle_color_buffer : register(t1);
 
-// at most there can be num_circles commands per command list
-// assume there are around 50000 tiles
-// assume that num_circles is 1000,
-// then there will be around 50000*1000*4 bytes needed to be stored in per_tile_command_list
-// 50000*1000*4 bytes = ~200 MB
 RWByteAddressBuffer per_tile_command_list: register(u0);
 RWTexture2D<float4> canvas : register(u1);
 
@@ -36,67 +31,7 @@ float4 blend_pd_over(float4 bg, float4 fg) {
     return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
-uint2 extract_ushort2_from_uint(uint input_value) {
-    // https://www.wolframalpha.com/input/?i=1111111111111111_2
-    uint right_mask = 65535;
-    uint left_mask = right_mask << 16;
-
-    uint left_value = (left_mask & input_value) >> 16;
-    uint right_value = right_mask & input_value;
-
-    uint2 result = {left_value, right_value};
-
-    return result;
-}
-
-uint4 extract_u8s_from_uint(uint input_value) {
-    uint r_shift = 24;
-    uint g_shift = 16;
-    uint b_shift = 8;
-
-    uint mask_a = 255;
-    uint mask_b = mask_a << b_shift;
-    uint mask_g = mask_a << g_shift;
-    uint mask_r = mask_a << r_shift;
-
-    uint r = (mask_r & input_value) >> r_shift;
-    uint g = (mask_g & input_value) >> g_shift;
-    uint b = (mask_b & input_value) >> b_shift;
-    uint a = (mask_a & input_value);
-
-    uint4 result = {r, g, b, a};
-    return result;
-}
-
-uint4 load_bbox_at_index(uint ix) {
-    uint x_address = ix*8;
-    uint y_address = x_address + 4;
-
-    uint packed_bbox_x = circle_bbox_buffer.Load(x_address);
-    uint packed_bbox_y = circle_bbox_buffer.Load(y_address);
-
-    uint2 bbox_x = extract_ushort2_from_uint(packed_bbox_x);
-    uint2 bbox_y = extract_ushort2_from_uint(packed_bbox_y);
-
-    uint4 bbox = {bbox_x, bbox_y};
-
-    return bbox;
-}
-
-float4 load_color_at_index(uint ix) {
-    uint address = ix*4;
-    uint packed_color = circle_color_buffer.Load(address);
-    uint4 int_colors = extract_u8s_from_uint(packed_color);
-    float4 float_int_colors = int_colors;
-
-    float r = float_int_colors.r/255.0f;
-    float g = float_int_colors.g/255.0f;
-    float b = float_int_colors.b/255.0f;
-    float a = float_int_colors.a/255.0f;
-
-    float4 result = {r, g, b, a};
-    return result;
-}
+#include "unpack.hlsl"
 
 bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     uint px = pixel_pos.x;
@@ -280,75 +215,11 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     return result;
 }
 
-uint4 generate_tile_bbox(uint2 tile_coord) {
-    uint tile_x_ix = tile_coord.x;
-    uint tile_y_ix = tile_coord.y;
-
-    uint left = tile_size*tile_x_ix;
-    uint top = tile_size*tile_y_ix;
-    uint right = left + tile_size;
-    uint bot = top + tile_size;
-
-    uint4 result = {left, right, top, bot};
-    return result;
-}
-
-bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
-
-    uint right1 = bbox1[1];
-    uint left0 = bbox0[0];
-    uint left1 = bbox1[0];
-    uint right0 = bbox0[1];
-    
-    if (right1 <= left0 || left1 >= right0) {
-        return 0;
-    }
-
-    uint bot1 = bbox1[3];
-    uint top0 = bbox0[2];
-    uint top1 = bbox1[2];
-    uint bot0 = bbox0[3];
-
-    if (bot1 <= top0 || top1 >= bot0) {
-        return 0;
-    }
-
-    return 1;
-}
-
-uint pack_command(uint tile_ix) {
-    return tile_ix;
-}
-
-[numthreads(~PTCL_X~, ~PTCL_Y~, 1)]
-void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
-    uint linear_tile_ix = num_tiles_x*DTid.y + DTid.x;
-    uint current_command_address = num_circles*linear_tile_ix*4;
-    uint next_tile_command_start_address = current_command_address + num_circles*4;
-    uint num_commands = 0;
-    uint4 tile_bbox = generate_tile_bbox(DTid.xy);
-
-    for (uint i = 0; i < num_circles; i++) {
-        uint4 object_bbox = load_bbox_at_index(i);
-        bool hit = do_bbox_interiors_intersect(object_bbox, tile_bbox);
-
-        if (hit) {
-            per_tile_command_list.Store(current_command_address, pack_command(i));
-            current_command_address += 4;
-        }
-    }
-
-    // mark end of command list for this tile, if command list does not take up entire allocated space
-    if (current_command_address < next_tile_command_start_address) {
-        per_tile_command_list.Store(current_command_address, 4294967295);
-    }
-}
-
 uint unpack_command(uint command_address) {
     return per_tile_command_list.Load(command_address);
 }
 
-[numthreads(~P_X~, ~P_Y~, 1)]
+[numthreads(16, 16, 1)]
 void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -407,15 +278,4 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     // bg = blend_pd_over(bg, fg);
 
     canvas[DTid.xy] = bg;
-    }
-
-float4 VSMain(float4 position: POSITION) : SV_Position
-{
-    return position;
-}
-
-float4 PSMain(float4 position: SV_Position) : SV_TARGET
-{
-    uint2 pos = position.xy;
-    return canvas[pos.xy];
 }

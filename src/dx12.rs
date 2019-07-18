@@ -6,7 +6,7 @@ use crate::error::error_if_failed_else_unit;
 use std::os::windows::ffi::OsStrExt;
 use std::{ffi, mem, path::Path, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
-use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, dxgidebug, synchapi, winnt};
+use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, d3dcompiler, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
 
@@ -716,12 +716,12 @@ impl ShaderByteCode {
         let entry = ffi::CString::new(entry)
             .expect("could not convert entry name String into ffi::CString");
 
-        error::error_if_failed_else_unit(winapi::um::d3dcompiler::D3DCompile(
+        error::error_if_failed_else_unit(d3dcompiler::D3DCompile(
             code.as_ptr() as *const _,
             code.len(),
             ptr::null(), // defines
             ptr::null(), // include
-            ptr::null_mut(),
+            d3dcompiler::D3D_COMPILE_STANDARD_FILE_INCLUDE,
             entry.as_ptr() as *const _,
             target.as_ptr() as *const _,
             flags,
@@ -747,10 +747,10 @@ impl ShaderByteCode {
             ffi::CString::new(target).expect("could not convert target string into C string");
         let entry = ffi::CString::new(entry).expect("could not convert entry string into C string");
         let encoded_file_path: Vec<u16> = file_path.as_os_str().encode_wide().collect();
-        let hresult = winapi::um::d3dcompiler::D3DCompileFromFile(
+        let hresult = d3dcompiler::D3DCompileFromFile(
             encoded_file_path.as_ptr() as *const _,
             ptr::null(),
-            ptr::null_mut(),
+            d3dcompiler::D3D_COMPILE_STANDARD_FILE_INCLUDE,
             entry.as_ptr() as *const _,
             target.as_ptr() as *const _,
             flags,
