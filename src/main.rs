@@ -22,18 +22,18 @@ fn main() {
             String::from("VSMain"),
             String::from("PSMain"),
             16,
+            32,
+            1,
+            1,
+            1,
         );
 
-        println!("beginning loop...");
         loop {
             if window::quit(&mut wnd) {
-                println!("quitting...");
                 gpu_state.destroy();
                 break;
             } else {
-                println!("rendering...");
                 gpu_state.render();
-                println!("looping...");
             }
         }
     }

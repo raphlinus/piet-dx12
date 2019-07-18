@@ -54,14 +54,17 @@ impl Quad {
 
 const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
-fn materialize_shader_code(tile_size: u32, shader_template_path: &Path, shader_path: &Path) {
+fn materialize_shader_code(ptcl_num_tiles_per_tg_x: u32, ptcl_num_tiles_per_tg_y: u32, paint_num_pixels_per_tg_x: u32, paint_num_pixels_per_tg_y: u32, shader_template_path: &Path, shader_path: &Path) {
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not read data from provided shader template path");
 
-    let step1 = step0.replace("~TILE_SIZE_SQUARED~", &format!("{}", tile_size * tile_size));
-    let step2 = step1.replace("~TILE_SIZE~", &format!("{}", tile_size));
+    let step1 = step0.replace("~PTCL_X~", &format!("{}", ptcl_num_tiles_per_tg_x));
+    let step2 = step1.replace("~PTCL_Y~", &format!("{}", ptcl_num_tiles_per_tg_y));
+    let step3 = step2.replace("~P_X~", &format!("{}", paint_num_pixels_per_tg_x));
+    let step4 = step3.replace("~P_Y~", &format!("{}", paint_num_pixels_per_tg_y));
 
-    std::fs::write(shader_path, step2).expect("shader template could not be materialized");
+
+    std::fs::write(shader_path, step4).expect("shader template could not be materialized");
 }
 
 pub struct GpuState {
@@ -86,13 +89,15 @@ pub struct GpuState {
 
     num_tiles_x: u32,
     num_tiles_y: u32,
+    num_ptcl_tg_x: u32,
+    num_ptcl_tg_y: u32,
 
     compute_descriptor_heap: dx12::DescriptorHeap,
     constants_buffer: dx12::Resource,
     circle_bbox_buffer: dx12::Resource,
     circle_color_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
-    intermediate_target_texture: dx12::Resource,
+    canvas_texture: dx12::Resource,
     per_tile_command_lists_root_signature: dx12::RootSignature,
     paint_root_signature: dx12::RootSignature,
     per_tile_command_lists_pipeline_state: dx12::PipelineState,
@@ -112,13 +117,12 @@ impl GpuState {
         paint_entry: String,
         vertex_entry: String,
         fragment_entry: String,
-        tile_size: u32,
+        tile_side_length_in_pixels: u32,
+        per_tile_command_lists_num_tiles_per_tg_x: u32,
+        per_tile_command_lists_num_tiles_per_tg_y: u32,
+        paint_num_tiles_per_tg_x: u32,
+        paint_num_tiles_per_tg_y: u32,
     ) -> GpuState {
-        let shader_folder = Path::new("A:\\piet-dx12\\resources");
-        let shader_template_path = shader_folder.join(Path::new("shaders_template.hlsl"));
-        let shader_path = shader_folder.join(Path::new("shaders.hlsl"));
-        materialize_shader_code(tile_size, &shader_template_path, &shader_path);
-
         let width = wnd.get_width();
         let height = wnd.get_height();
         let num_circles = 1000;
@@ -126,19 +130,71 @@ impl GpuState {
 //        let num_circles = 1;
 //        let (bbox_data, color_data) = scene::create_constant_scene();
 
-        let f_tile_size = tile_size as f32;
+        let f_tile_side_length_in_pixels = tile_side_length_in_pixels as f32;
         let f_width = width as f32;
         let f_height = height as f32;
-        let canvas_quad_width = (f_width / f_tile_size).ceil() * f_tile_size;
-        let canvas_quad_height = (f_height / f_tile_size).ceil() * f_tile_size;
-        let num_tiles_x = (canvas_quad_width / f_tile_size) as u32;
-        let num_tiles_y = (canvas_quad_height / f_tile_size) as u32;
+        let canvas_quad_width = (f_width / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
+        let canvas_quad_height = (f_height / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
+        let num_tiles_x = {
+            let min_ntx = (canvas_quad_width / f_tile_side_length_in_pixels) as u32;
+            let remainder = min_ntx % per_tile_command_lists_num_tiles_per_tg_x;
+
+            if remainder == 0 {
+                min_ntx
+            } else {
+                min_ntx + (per_tile_command_lists_num_tiles_per_tg_x - remainder)
+            }
+        };
+        let num_tiles_y = {
+            let min_nty = (canvas_quad_height / f_tile_side_length_in_pixels) as u32;
+            let remainder = min_nty % per_tile_command_lists_num_tiles_per_tg_y;
+
+            if remainder == 0 {
+                min_nty
+            } else {
+                min_nty + (per_tile_command_lists_num_tiles_per_tg_y - remainder)
+            }
+        };
+        let canvas_quad_width = (num_tiles_x * tile_side_length_in_pixels) as f32;
+        let canvas_quad_height = (num_tiles_y * tile_side_length_in_pixels) as f32;
+        let num_ptcl_tg_x = num_tiles_x / per_tile_command_lists_num_tiles_per_tg_x;
+        let num_ptcl_tg_y = num_tiles_y / per_tile_command_lists_num_tiles_per_tg_y;
+        let paint_num_pixels_per_tg_x = paint_num_tiles_per_tg_x*tile_side_length_in_pixels;
+        let paint_num_pixels_per_tg_y = paint_num_tiles_per_tg_y*tile_side_length_in_pixels;
+
         let canvas_quad = Quad::new(
             -1.0 * (canvas_quad_width / 2.0),
             -1.0 * (canvas_quad_height / 2.0),
             canvas_quad_width,
             canvas_quad_height,
         );
+
+        let shader_folder = Path::new("A:\\piet-dx12\\resources");
+        let shader_template_path = shader_folder.join(Path::new("shaders_template.hlsl"));
+        let shader_path = shader_folder.join(Path::new("shaders.hlsl"));
+        materialize_shader_code(
+            per_tile_command_lists_num_tiles_per_tg_x, 
+            per_tile_command_lists_num_tiles_per_tg_y, 
+            paint_num_pixels_per_tg_x, 
+            paint_num_pixels_per_tg_y, 
+            &shader_template_path, 
+            &shader_path
+        );
+
+        println!("width: {}", width);
+        println!("height: {}", height);
+        println!("tile_side_length_in_pixels: {}", tile_side_length_in_pixels);
+        println!("per_tile_command_lists_num_tiles_per_tg_x: {}", per_tile_command_lists_num_tiles_per_tg_x);
+        println!("per_tile_command_lists_num_tiles_per_tg_y: {}", per_tile_command_lists_num_tiles_per_tg_y);
+        println!("num_tiles_x: {}", num_tiles_x);
+        println!("num_tiles_y: {}", num_tiles_y);
+        println!("canvas_quad_width: {}", canvas_quad_width);
+        println!("canvas_quad_height: {}", canvas_quad_height);
+        println!("slop_x: {}", (canvas_quad_width/(width as f32)) - 1.0 );
+        println!("slop_y: {}", (canvas_quad_height/(height as f32)) - 1.0 );
+        println!("num_ptcl_tg_x: {}", num_ptcl_tg_x);
+        println!("num_ptcl_tg_x: {}", num_ptcl_tg_y);
+        //panic!("stop");
 
         let viewport = d3d12::D3D12_VIEWPORT {
             TopLeftX: 0.0,
@@ -178,7 +234,7 @@ impl GpuState {
             circle_bbox_buffer,
             circle_color_buffer,
             per_tile_command_lists_buffer,
-            intermediate_target_texture,
+            canvas_texture,
         ) = GpuState::create_compute_pipeline_dependencies(
             device.clone(),
             width,
@@ -186,7 +242,7 @@ impl GpuState {
             num_circles,
             num_tiles_x,
             num_tiles_y,
-            tile_size,
+            tile_side_length_in_pixels,
             bbox_data,
             color_data,
         );
@@ -234,13 +290,15 @@ impl GpuState {
 
             num_tiles_x,
             num_tiles_y,
+            num_ptcl_tg_x,
+            num_ptcl_tg_y,
 
             compute_descriptor_heap,
             constants_buffer,
             circle_bbox_buffer,
             circle_color_buffer,
             per_tile_command_lists_buffer,
-            intermediate_target_texture,
+            canvas_texture,
             per_tile_command_lists_root_signature,
             paint_root_signature,
             per_tile_command_lists_pipeline_state,
@@ -279,7 +337,7 @@ impl GpuState {
         );
 
         self.command_list
-            .dispatch(self.num_tiles_x*self.num_tiles_x, 1, 1);
+            .dispatch(self.num_ptcl_tg_x, self.num_ptcl_tg_y, 1);
 
         // need to ensure all writes to per_tile_command_lists are complete before any reads are done
         let synchronize_wrt_per_tile_command_lists =
@@ -304,10 +362,10 @@ impl GpuState {
             .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
 
         // need to ensure all writes to intermediate are complete before any reads are done
-        let synchronize_wrt_intermediate_target =
-            dx12::create_uav_resource_barrier(self.intermediate_target_texture.0.as_raw());
+        let synchronize_wrt_canvas =
+            dx12::create_uav_resource_barrier(self.canvas_texture.0.as_raw());
         self.command_list
-            .set_resource_barrier(vec![synchronize_wrt_intermediate_target]);
+            .set_resource_barrier(vec![synchronize_wrt_canvas]);
 
         // graphics pipeline call
         self.command_list
@@ -528,7 +586,7 @@ impl GpuState {
         num_circles: u32,
         num_tiles_x: u32,
         num_tiles_y: u32,
-        tile_size: u32,
+        tile_side_length_in_pixels: u32,
         bbox_data: Vec<u8>,
         color_data: Vec<u8>,
     ) -> (
@@ -549,7 +607,7 @@ impl GpuState {
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
         // create constants buffer
-        let constants = [num_circles, tile_size, num_tiles_x, num_tiles_y];
+        let constants = [num_circles, tile_side_length_in_pixels, num_tiles_x, num_tiles_y];
         let constant_buffer_stride = mem::size_of::<u32>();
         let constant_buffer_size = constant_buffer_stride * constants.len();
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -748,7 +806,7 @@ impl GpuState {
 
         // create intermediate target resource
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
-        let intermediate_target_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        let canvas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
             Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -758,12 +816,12 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let intermediate_target_resource_desc = d3d12::D3D12_RESOURCE_DESC {
+        let canvas_resource_desc = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
             //TODO: what alignment should be chosen?
             Alignment: 0,
-            Width: width as u64,
-            Height: height,
+            Width: (num_tiles_x*tile_side_length_in_pixels) as u64,
+            Height: num_tiles_y*tile_side_length_in_pixels,
             DepthOrArraySize: 1,
             //TODO: what should MipLevels be?
             MipLevels: 1,
@@ -778,15 +836,15 @@ impl GpuState {
         };
         let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
-        let mut intermediate_target = device.create_committed_resource(
-            &intermediate_target_heap_properties,
+        let mut canvas = device.create_committed_resource(
+            &canvas_heap_properties,
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &intermediate_target_resource_desc,
+            &canvas_resource_desc,
             d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             ptr::null(),
         );
         device.create_unordered_access_view(
-            intermediate_target.clone(),
+            canvas.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(4),
         );
 
@@ -796,7 +854,7 @@ impl GpuState {
             circle_bbox_buffer,
             circle_color_buffer,
             per_tile_command_lists,
-            intermediate_target,
+            canvas,
         )
     }
 
@@ -834,7 +892,7 @@ impl GpuState {
         };
         // intermediate target is in a separate descriptor range from per_tile_command_lists
         // thus OffsetInDescriptorsFromTableStart should be the same?
-        let intermediate_target_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: 4,
@@ -876,7 +934,7 @@ impl GpuState {
             constants_descriptor_range,
             objects_descriptor_range,
             per_tile_command_lists_descriptor_range,
-            intermediate_target_descriptor_range,
+            canvas_descriptor_range,
         ];
         let paint_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
             NumDescriptorRanges: paint_descriptor_ranges.len() as u32,
@@ -961,7 +1019,7 @@ impl GpuState {
         shader_compile_flags: minwindef::DWORD,
         vertex_entry: String,
         fragment_entry: String,
-        screen_quad: Quad,
+        canvas_quad: Quad,
     ) -> (
         dx12::RootSignature,
         dx12::PipelineState,
@@ -1001,7 +1059,7 @@ impl GpuState {
         let graphics_root_signature = device.create_root_signature(0, blob);
 
         // create vertex buffer
-        let vertices = screen_quad.as_vertices();
+        let vertices = canvas_quad.as_vertices();
         let vertex_buffer_stride = mem::size_of::<Vertex>();
         let vertex_buffer_size = vertex_buffer_stride * vertices.len();
         let vertex_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {

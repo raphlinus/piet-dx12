@@ -1,5 +1,3 @@
-#define BLOCK_SIZE ~TILE_SIZE_SQUARED~
-
 cbuffer Constants : register(b0)
 {
 	uint num_circles;
@@ -282,9 +280,9 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     return result;
 }
 
-uint4 generate_tile_bbox(uint tile_ix) {
-    uint tile_x_ix = round(fmod(tile_ix, num_tiles_x));
-    uint tile_y_ix = tile_ix/num_tiles_x;
+uint4 generate_tile_bbox(uint2 tile_coord) {
+    uint tile_x_ix = tile_coord.x;
+    uint tile_y_ix = tile_coord.y;
 
     uint left = tile_size*tile_x_ix;
     uint top = tile_size*tile_y_ix;
@@ -322,27 +320,27 @@ uint pack_command(uint tile_ix) {
     return tile_ix;
 }
 
-[numthreads(~TILE_SIZE_SQUARED~, 1, 1)]
+[numthreads(~PTCL_X~, ~PTCL_Y~, 1)]
 void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
-    uint tile_ix = DTid.x;
-    uint command_address = num_circles*tile_ix*4;
-    uint next_tile_command_start_address = command_address + num_circles*4;
+    uint linear_tile_ix = num_tiles_x*DTid.y + DTid.x;
+    uint current_command_address = num_circles*linear_tile_ix*4;
+    uint next_tile_command_start_address = current_command_address + num_circles*4;
     uint num_commands = 0;
-    uint4 tile_bbox = generate_tile_bbox(tile_ix);
+    uint4 tile_bbox = generate_tile_bbox(DTid.xy);
 
     for (uint i = 0; i < num_circles; i++) {
         uint4 object_bbox = load_bbox_at_index(i);
         bool hit = do_bbox_interiors_intersect(object_bbox, tile_bbox);
 
         if (hit) {
-            per_tile_command_list.Store(command_address, pack_command(i));
-            command_address += 4;
+            per_tile_command_list.Store(current_command_address, pack_command(i));
+            current_command_address += 4;
         }
     }
 
     // mark end of command list for this tile, if command list does not take up entire allocated space
-    if (command_address < next_tile_command_start_address) {
-        per_tile_command_list.Store(command_address, 4294967295);
+    if (current_command_address < next_tile_command_start_address) {
+        per_tile_command_list.Store(current_command_address, 4294967295);
     }
 }
 
@@ -350,7 +348,7 @@ uint unpack_command(uint command_address) {
     return per_tile_command_list.Load(command_address);
 }
 
-[numthreads(~TILE_SIZE~, ~TILE_SIZE~, 1)]
+[numthreads(~P_X~, ~P_Y~, 1)]
 void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
