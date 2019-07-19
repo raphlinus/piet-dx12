@@ -9,6 +9,7 @@ use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, win
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, d3dcompiler, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
+use self::winapi::um::d3dcommon::ID3DBlob;
 
 // everything is ripped from d3d12-rs, but wio::com::ComPtr, and winapi are used more directly
 
@@ -702,36 +703,45 @@ impl ShaderByteCode {
     ///
     /// * `target`: example format: `ps_5_1`.
     pub unsafe fn compile(
-        code: &[u8],
+        source: String,
         target: String,
         entry: String,
         flags: minwindef::DWORD,
     ) -> Blob {
-        let mut shader = ptr::null_mut();
+        let mut shader_blob_ptr: *mut ID3DBlob = ptr::null_mut();
         //TODO: use error blob properly
-        let mut _error = ptr::null_mut();
+        let mut error_blob_ptr: *mut ID3DBlob = ptr::null_mut();
 
         let target = ffi::CString::new(target)
             .expect("could not convert target format string into ffi::CString");
         let entry = ffi::CString::new(entry)
             .expect("could not convert entry name String into ffi::CString");
 
-        error::error_if_failed_else_unit(d3dcompiler::D3DCompile(
-            code.as_ptr() as *const _,
-            code.len(),
-            ptr::null(), // defines
-            ptr::null(), // include
+        let hresult = d3dcompiler::D3DCompile(
+            source.as_ptr() as *const _,
+            source.len(),
+            ptr::null(),
+            ptr::null(),
             d3dcompiler::D3D_COMPILE_STANDARD_FILE_INCLUDE,
             entry.as_ptr() as *const _,
             target.as_ptr() as *const _,
             flags,
             0,
-            &mut shader as *mut _ as *mut _,
-            &mut _error as *mut _ as *mut _,
-        ))
-        .expect("could not compile shader code");
+            &mut shader_blob_ptr as *mut _ as *mut _,
+            &mut error_blob_ptr as *mut _ as *mut _,
+        );
 
-        Blob(ComPtr::from_raw(shader))
+        #[cfg(debug_assertions)]
+        {
+            if (!error_blob_ptr.is_null()) {
+                let error_blob = Blob(ComPtr::from_raw(error_blob_ptr));
+                Blob::print_to_console(error_blob.clone());
+            }
+        }
+
+        error::error_if_failed_else_unit(hresult).expect("shader compilation failed");
+
+        Blob(ComPtr::from_raw(shader_blob_ptr))
     }
 
     pub unsafe fn compile_from_file(
@@ -740,36 +750,11 @@ impl ShaderByteCode {
         entry: String,
         flags: minwindef::DWORD,
     ) -> Blob {
-        let mut shader = ptr::null_mut();
-        let mut error: *mut d3dcommon::ID3DBlob = ptr::null_mut();
+        let file_open_error = format!("could not open shader source file for entry: {}", &entry);
+        let source = std::fs::read_to_string(file_path)
+            .expect(&file_open_error);
 
-        let target =
-            ffi::CString::new(target).expect("could not convert target string into C string");
-        let entry = ffi::CString::new(entry).expect("could not convert entry string into C string");
-        let encoded_file_path: Vec<u16> = file_path.as_os_str().encode_wide().collect();
-        let hresult = d3dcompiler::D3DCompileFromFile(
-            encoded_file_path.as_ptr() as *const _,
-            ptr::null(),
-            d3dcompiler::D3D_COMPILE_STANDARD_FILE_INCLUDE,
-            entry.as_ptr() as *const _,
-            target.as_ptr() as *const _,
-            flags,
-            0,
-            &mut shader as *mut _ as *mut _,
-            &mut error as *mut _ as *mut _,
-        );
-
-        #[cfg(debug_assertions)]
-        {
-            if (!error.is_null()) {
-                let error_blob = Blob(ComPtr::from_raw(error));
-                Blob::print_to_console(error_blob.clone());
-            }
-        }
-
-        error::error_if_failed_else_unit(hresult).expect("shader compilation failed");
-
-        Blob(ComPtr::from_raw(shader))
+        ShaderByteCode::compile(source, target, entry, flags)
     }
 }
 

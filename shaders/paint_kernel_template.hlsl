@@ -31,19 +31,28 @@ float4 blend_pd_over(float4 bg, float4 fg) {
     return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
-#include "unpack.hlsl"
+#include "shaders/unpack.hlsl"
 
 bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     uint px = pixel_pos.x;
     uint py = pixel_pos.y;
 
-    if (bbox[0] <= px && px <= bbox[1]) {
-        if (bbox[2] <= py && py <= bbox[3]) {
-            return 1;
+    // use of explicit result to avoid the following warning:
+    // warning X4000: use of potentially uninitialized variable
+    bool result = 0;
+
+    uint left = bbox[0];
+    uint right = bbox[1];
+    uint top = bbox[2];
+    uint bot = bbox[3];
+
+    if (left <= px && px <= right) {
+        if (top <= py && py <= bot) {
+            result = 1;
         }
     }
 
-    return 0;
+    return result;
 }
 
 bool in_rect(uint2 pixel_pos, uint2 origin, uint2 size) {
@@ -54,11 +63,13 @@ bool in_rect(uint2 pixel_pos, uint2 origin, uint2 size) {
     uint top = origin.y - size.y;
     uint bot = origin.y;
 
+    bool result = 1;
+
     if (px < left || py > bot || py < top || px > right) {
-        return 0;
-    } else {
-        return 1;
+        result = 0;
     }
+
+    return result;
 }
 
 bool get_digit_code_0(uint digit) {
@@ -219,7 +230,7 @@ uint unpack_command(uint command_address) {
     return per_tile_command_list.Load(command_address);
 }
 
-[numthreads(16, 16, 1)]
+[numthreads(~P_X~, ~P_Y~, 1)]
 void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
     float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -229,12 +240,13 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     // // uint casting is same as flooring (in general, casting is round to zero)
     uint tile_ix = Gid.y*num_tiles_x + Gid.x;
     uint command_address = num_circles*tile_ix*4;
+    uint max_uint = 4294967295;
 
     for (uint i = 0; i < num_circles; i++) {
         // do we want object index, bbox loading, color loading etc. to be in thread group shared memory?
         uint object_index = unpack_command(command_address);
 
-        if (object_index == 4294967295) {
+        if (object_index == max_uint) {
             break;
         } else {
             uint4 bbox = load_bbox_at_index(object_index);

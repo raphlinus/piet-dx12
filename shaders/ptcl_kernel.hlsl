@@ -26,14 +26,15 @@ uint4 generate_tile_bbox(uint2 tile_coord) {
 }
 
 bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
-
     uint right1 = bbox1[1];
     uint left0 = bbox0[0];
     uint left1 = bbox1[0];
     uint right0 = bbox0[1];
+
+    bool result = 1;
     
     if (right1 <= left0 || left1 >= right0) {
-        return 0;
+        result = 0;
     }
 
     uint bot1 = bbox1[3];
@@ -41,20 +42,20 @@ bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
     uint top1 = bbox1[2];
     uint bot0 = bbox0[3];
 
-    if (bot1 <= top0 || top1 >= bot0) {
-        return 0;
+    if (result && (bot1 <= top0 || top1 >= bot0)) {
+        result = 0;
     }
 
-    return 1;
+    return result;
 }
 
-#include "unpack.hlsl"
+#include "shaders/unpack.hlsl"
 
 uint pack_command(uint tile_ix) {
     return tile_ix;
 }
 
-[numthreads(~PTCL_X~, ~PTCL_Y~, 1)]
+[numthreads(32, 1, 1)]
 void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
     uint linear_tile_ix = num_tiles_x*DTid.y + DTid.x;
     uint current_command_address = num_circles*linear_tile_ix*4;

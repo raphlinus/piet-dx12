@@ -1,16 +1,8 @@
 extern crate winapi;
 
-use os::windows::ffi::OsStrExt;
 use std::{os, vec::Vec};
 use winapi::shared::{minwindef, ntdef, windef};
 use winapi::um::{libloaderapi, shellscalingapi, wingdi, winuser};
-
-pub fn win32_string(value: &str) -> Vec<u16> {
-    std::ffi::OsStr::new(value)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
-}
 
 const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: windef::DPI_AWARENESS_CONTEXT = -4isize as _;
 type SetProcessDPIAware = unsafe extern "system" fn() -> minwindef::BOOL;

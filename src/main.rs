@@ -9,11 +9,21 @@ pub mod gpu;
 pub mod scene;
 pub mod window;
 
+use std::os::windows::ffi::OsStrExt;
+
+pub fn win32_string(value: &str) -> Vec<u16> {
+    std::ffi::OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+
 fn main() {
     unsafe {
         println!("creating window...");
         let mut wnd =
-            window::Window::new(window::win32_string("test"), window::win32_string("test"));
+            window::Window::new(win32_string("test"), win32_string("test"));
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
