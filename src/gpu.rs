@@ -674,6 +674,7 @@ impl GpuState {
 
         // create circle bbox buffer
         let circle_bbox_buffer_size_in_bytes = bbox_data.len();
+        let circle_bbox_buffer_size_in_u32s = (circle_bbox_buffer_size_in_bytes/mem::size_of::<u32>()) as u32;
         let circle_bbox_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -720,11 +721,12 @@ impl GpuState {
             circle_bbox_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
             0,
-            bbox_data.len() as u32,
+            circle_bbox_buffer_size_in_u32s,
         );
 
         // create circle color buffer
         let circle_color_buffer_size_in_bytes = color_data.len();
+        let circle_color_buffer_size_in_u32s = (circle_color_buffer_size_in_bytes/mem::size_of::<u32>()) as u32;
         let circle_color_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -771,7 +773,7 @@ impl GpuState {
             circle_color_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(2),
             0,
-            color_data.len() as u32,
+            circle_color_buffer_size_in_u32s,
         );
 
         // create per tile command list resource
@@ -786,8 +788,8 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let per_tile_command_list_buffer_size =
-            (mem::size_of::<u32>() as u64) * ((num_circles * num_tiles_x * num_tiles_y) as u64);
+        let per_tile_command_list_buffer_size_in_u32s = num_circles * num_tiles_x * num_tiles_y;
+        let per_tile_command_list_buffer_size = (mem::size_of::<u32>() as u64) * (per_tile_command_list_buffer_size_in_u32s as u64);
         assert!(
             per_tile_command_list_buffer_size < (std::u32::MAX as u64),
             "per_tile_command_list_buffer_size >= std::u32::MAX!"
@@ -820,7 +822,7 @@ impl GpuState {
             per_tile_command_lists.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(3),
             0,
-            per_tile_command_list_buffer_size as u32,
+            per_tile_command_list_buffer_size_in_u32s,
         );
 
         // create intermediate target resource

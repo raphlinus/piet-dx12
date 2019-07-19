@@ -531,7 +531,7 @@ impl Device {
     ) {
         let mut srv_desc = d3d12::D3D12_SHADER_RESOURCE_VIEW_DESC {
             // shouldn't flags be dxgiformat::DXGI_FORMAT_R32_TYPELESS?
-            Format: dxgiformat::DXGI_FORMAT_UNKNOWN,
+            Format: dxgiformat::DXGI_FORMAT_R32_TYPELESS,
             ViewDimension: d3d12::D3D12_SRV_DIMENSION_BUFFER,
             Shader4ComponentMapping: 0x1688,
             ..mem::zeroed()
@@ -540,9 +540,9 @@ impl Device {
             FirstElement: first_element,
             NumElements: num_elements,
             // shouldn't StructureByteStride be 0?
-            StructureByteStride: 1,
+            StructureByteStride: 0,
             // shouldn't flags be d3d12::D3D12_BUFFER_SRV_FLAG_RAW?
-            Flags: d3d12::D3D12_BUFFER_SRV_FLAG_NONE,
+            Flags: d3d12::D3D12_BUFFER_SRV_FLAG_RAW,
         };
         self.0
             .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
