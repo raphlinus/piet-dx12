@@ -759,10 +759,10 @@ impl GpuState {
             VisibleNodeMask: 0,
         };
         let circle_color_buffer = device.create_committed_resource(
-            &circle_bbox_buffer_heap_properties,
+            &circle_color_buffer_heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &circle_bbox_buffer_resource_description,
+            &circle_color_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
@@ -788,8 +788,6 @@ impl GpuState {
         };
         let per_tile_command_list_buffer_size =
             (mem::size_of::<u32>() as u64) * ((num_circles * num_tiles_x * num_tiles_y) as u64);
-//        println!("{}", per_tile_command_list_buffer_size);
-//        panic!("stop");
         assert!(
             per_tile_command_list_buffer_size < (std::u32::MAX as u64),
             "per_tile_command_list_buffer_size >= std::u32::MAX!"
@@ -800,7 +798,6 @@ impl GpuState {
             Height: 1,
             DepthOrArraySize: 1,
             MipLevels: 1,
-            Format: winapi::shared::dxgiformat::DXGI_FORMAT_UNKNOWN,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
@@ -817,6 +814,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             ptr::null(),
         );
+        println!("creating per tile command lists buffer...");
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
         device.create_byte_addressed_buffer_unordered_access_view(
             per_tile_command_lists.clone(),

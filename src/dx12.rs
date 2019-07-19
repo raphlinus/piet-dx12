@@ -474,7 +474,7 @@ impl Device {
     ) {
         // shouldn't flags be dxgiformat::DXGI_FORMAT_R32_TYPELESS?
         let mut uav_desc = d3d12::D3D12_UNORDERED_ACCESS_VIEW_DESC {
-            Format: dxgiformat::DXGI_FORMAT_UNKNOWN,
+            Format: dxgiformat::DXGI_FORMAT_R32_TYPELESS,
             ViewDimension: d3d12::D3D12_UAV_DIMENSION_BUFFER,
             ..mem::zeroed()
         };
@@ -482,10 +482,10 @@ impl Device {
             FirstElement: first_element,
             NumElements: num_elements,
             // shouldn't StructureByteStride be 0?
-            StructureByteStride: 1,
+            StructureByteStride: 0,
             CounterOffsetInBytes: 0,
-            // shouldn't flags be d3d12::D3D12_BUFFER_SRV_FLAG_RAW?
-            Flags: d3d12::D3D12_BUFFER_UAV_FLAG_NONE,
+            // shouldn't flags be d3d12::D3D12_BUFFER_UAV_FLAG_RAW?
+            Flags: d3d12::D3D12_BUFFER_UAV_FLAG_RAW,
         };
         self.0.CreateUnorderedAccessView(
             resource.0.as_raw(),
