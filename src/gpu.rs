@@ -176,7 +176,7 @@ impl GpuState {
             canvas_quad_height,
         );
 
-        let shader_folder = Path::new("A:\\piet-dx12\\shaders");
+        let shader_folder = Path::new("shaders");
 
         let ptcl_kernel_template_path = shader_folder.join(Path::new("ptcl_kernel_template.hlsl"));
         let ptcl_kernel_path = shader_folder.join(Path::new("ptcl_kernel.hlsl"));
