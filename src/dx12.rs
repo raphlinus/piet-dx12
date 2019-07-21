@@ -34,9 +34,6 @@ pub struct SwapChain1(pub ComPtr<dxgi1_2::IDXGISwapChain1>);
 pub struct SwapChain3(pub ComPtr<dxgi1_4::IDXGISwapChain3>);
 
 #[derive(Clone)]
-pub struct QueryHeap(pub ComPtr<d3d12::ID3D12QueryHeap>);
-
-#[derive(Clone)]
 pub struct Device(pub ComPtr<d3d12::ID3D12Device>);
 
 #[derive(Clone)]
@@ -86,6 +83,9 @@ pub struct ShaderByteCode {
 }
 
 pub struct DebugController(pub d3d12sdklayers::ID3D12Debug);
+
+#[derive(Clone)]
+pub struct QueryHeap(pub d3d12::ID3D12QueryHeap);
 
 impl Resource {
     pub unsafe fn upload_data_to_resource<T>(&self, count: usize, data: *const T) {
@@ -619,6 +619,24 @@ impl Device {
 
         Resource(ComPtr::from_raw(resource))
     }
+
+    pub unsafe fn create_query_heap(&self, heap_type: d3d12::D3D12_QUERY_HEAP_TYPE) -> QueryHeap {
+        let query_heap_desc = d3d12::D3D12_QUERY_HEAP_DESC {
+            Type: heap_type,
+            Count: 1,
+            NodeMask: 0,
+        };
+
+        let mut query_heap = ptr::null_mut();
+
+        error_if_failed_else_unit(self.0.CreateQueryHeap(
+            &query_heap_desc as *const _,
+            &d3d12::ID3D12QueryHeap::uuidof(),
+            &mut query_heap as *mut _ as *mut _,
+        )).expect("could not create query heap");
+
+        QueryHeap(ComPtr::from_raw(query_heap))
+    }
 }
 
 impl CommandAllocator {
@@ -937,6 +955,14 @@ impl GraphicsCommandList {
             descriptor_heap_pointers.len() as u32,
             (&descriptor_heap_pointers).as_ptr() as *mut _,
         );
+    }
+
+    pub unsafe fn end_timing_query(&self, query_heap: QueryHeap, index: u32) {
+        self.0.EndQuery(query_heap.0.as_raw() as *mut _, d3d12::D3D12_QUERY_TYPE_TIMESTAMP, index);
+    }
+
+    pub unsafe fn resolve_timing_query_data(&self, query_heap: QueryHeap, start_index: u32, num_queries: u32, destination_buffer: Resource, aligned_destination_buffer_offset: u64) {
+        self.0.ResolveQueryData(query_heap.0.as_raw() as *mut _, d3d12::D3D12_QUERY_TYPE_TIMESTAMP, start_index, num_queries, destination_buffer.0.as_raw() as *mut _, aligned_destination_buffer_offset);
     }
 }
 

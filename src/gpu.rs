@@ -115,6 +115,9 @@ pub struct GpuState {
     fence_event: dx12::Event,
     fence: dx12::Fence,
     fence_values: Vec<u64>,
+
+    query_heap: dx12::QueryHeap,
+    timing_query_buffer: dx12::Resource,
 }
 
 impl GpuState {
@@ -276,7 +279,7 @@ impl GpuState {
             vertex_buffer_view,
             command_list,
         ) = GpuState::create_pipeline_states(
-            &device,
+            device.clone(),
             &ptcl_kernel_path,
             &paint_kernel_path,
             &vertex_shader_path,
@@ -288,6 +291,9 @@ impl GpuState {
             &command_allocators,
             canvas_quad,
         );
+
+        let query_heap = device.create_query_heap(d3d12::D3D12_QUERY_HEAP_TYPE_TIMESTAMP);
+        let timing_query_buffer = GpuState::create_timing_query_buffer(device.clone());
 
         let mut gpu_state = GpuState {
             width,
@@ -330,6 +336,8 @@ impl GpuState {
             fence_event,
             fence,
             fence_values: (0..FRAME_COUNT).into_iter().map(|_| 1).collect(),
+
+            query_heap,
         };
 
         // wait for upload of any resources to gpu
@@ -339,6 +347,14 @@ impl GpuState {
     }
 
     unsafe fn populate_command_list(&mut self) {
+        let timing_query_index: u32 = 0;
+
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
+            
         self.command_allocators[self.frame_index].reset();
 
         // per tile command list generation call
@@ -360,11 +376,23 @@ impl GpuState {
         self.command_list
             .dispatch(self.num_ptcl_tg_x, self.num_ptcl_tg_y, 1);
 
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
+
         // need to ensure all writes to per_tile_command_lists are complete before any reads are done
         let synchronize_wrt_per_tile_command_lists =
             dx12::create_uav_resource_barrier(self.per_tile_command_lists_buffer.0.as_raw());
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_per_tile_command_lists]);
+
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
 
         // paint call
         self.command_list
@@ -382,11 +410,23 @@ impl GpuState {
         self.command_list
             .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
 
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
+
         // need to ensure all writes to intermediate are complete before any reads are done
         let synchronize_wrt_canvas =
             dx12::create_uav_resource_barrier(self.canvas_texture.0.as_raw());
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_canvas]);
+
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
 
         // graphics pipeline call
         self.command_list
@@ -402,6 +442,12 @@ impl GpuState {
         );
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
+
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
         let transition_render_target_from_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
@@ -409,6 +455,12 @@ impl GpuState {
         );
         self.command_list
             .set_resource_barrier(vec![transition_render_target_from_present]);
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
+        
         let mut rt_descriptor = self
             .rtv_descriptor_heap
             .get_cpu_descriptor_handle_at_offset(self.frame_index as u32);
@@ -423,6 +475,11 @@ impl GpuState {
             .set_vertex_buffer(0, 1, &self.vertex_buffer_view);
         self.command_list.draw_instanced(4, 1, 0, 0);
 
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            timing_query_index += 1;
+        }
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -430,6 +487,12 @@ impl GpuState {
         );
         self.command_list
             .set_resource_barrier(vec![transition_render_target_to_present]);
+        #[cfg(debug_assertions)]
+        {
+            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
+            self.command_list.resolve_timing_query_data(self.query_heap.unwrap().clone(), 0, timing_query_index + 1, self.timing_query_buffer, 0);
+        }
+        
         self.command_list.close();
     }
 
@@ -880,7 +943,7 @@ impl GpuState {
     }
 
     unsafe fn create_compute_pipeline_states(
-        device: &dx12::Device,
+        device: dx12::Device,
         ptcl_kernel_path: &Path,
         paint_kernel_path: &Path,
         shader_compile_flags: minwindef::DWORD,
@@ -1038,7 +1101,7 @@ impl GpuState {
     }
 
     unsafe fn create_graphics_pipeline_state(
-        device: &dx12::Device,
+        device: dx12::Device,
         vertex_shader_path: &Path,
         fragment_shader_path: &Path,
         shader_compile_flags: minwindef::DWORD,
@@ -1243,7 +1306,7 @@ impl GpuState {
     }
 
     unsafe fn create_pipeline_states(
-        device: &dx12::Device,
+        device: dx12::Device,
         ptcl_kernel_path: &Path,
         paint_kernel_path: &Path,
         vertex_shader_path: &Path,
@@ -1318,5 +1381,43 @@ impl GpuState {
             vertex_buffer_view,
             command_list,
         )
+    }
+
+    unsafe fn create_timing_query_buffer(device: dx12::Device, num_expected_results: u32) -> dx12::Resource {
+        let size_in_bytes = mem::size_of::<u32>()*(num_expected_results as u32);
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: size_in_bytes as u64,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            ..mem::zeroed()
+        };
+        let constants_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let constants_buffer = device.create_committed_resource(
+            &constants_buffer_heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &constants_buffer_resource_description,
+            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            ptr::null(),
+        );
+
+        device.create_committed_resource(heap_properties, flags, &resource_description, initial_resource_state, ptr::null())
     }
 }
