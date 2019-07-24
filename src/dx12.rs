@@ -85,7 +85,7 @@ pub struct ShaderByteCode {
 pub struct DebugController(pub d3d12sdklayers::ID3D12Debug);
 
 #[derive(Clone)]
-pub struct QueryHeap(pub d3d12::ID3D12QueryHeap);
+pub struct QueryHeap(pub ComPtr<d3d12::ID3D12QueryHeap>);
 
 impl Resource {
     pub unsafe fn upload_data_to_resource<T>(&self, count: usize, data: *const T) {
@@ -96,9 +96,28 @@ impl Resource {
             &zero_range as *const _,
             &mut mapped_memory as *mut _ as *mut _,
         ))
-        .expect("could not get pointer to mapped memory");
+        .expect("could not map GPU mem to CPU mem");
         ptr::copy(data, mapped_memory, count);
         self.0.Unmap(0, ptr::null());
+    }
+
+    pub unsafe fn download_data_from_resource<T>(&self, count: usize) -> Vec<T> {
+        let data_size_in_bytes = mem::size_of::<T>();
+        let mut mapped_memory = ptr::null_mut();
+        let zero_range = d3d12::D3D12_RANGE { Begin: 0, End: data_size_in_bytes*count, };
+        error::error_if_failed_else_unit(self.0.Map(
+            0,
+            &zero_range as *const _,
+            &mut mapped_memory as *mut _ as *mut _,
+        ))
+            .expect("could not map GPU mem to CPU mem");
+        let mut result: Vec<T> = Vec::new();
+        result.reserve(count);
+        ptr::copy(mapped_memory as *const T, result.as_mut_ptr() as *mut T, count);
+        result.set_len(count);
+        self.0.Unmap(0, ptr::null());
+
+        result
     }
 
     pub unsafe fn get_gpu_virtual_address(&self) -> d3d12::D3D12_GPU_VIRTUAL_ADDRESS {
@@ -169,6 +188,14 @@ impl CommandQueue {
     ) {
         self.0
             .ExecuteCommandLists(num_command_lists, command_lists.as_ptr());
+    }
+
+    pub unsafe fn get_timestamp_frequency(&self) -> u64 {
+        let mut result: u64 = 0;
+
+        error_if_failed_else_unit(self.0.GetTimestampFrequency(&mut result as *mut _)).expect("could not get timestamp frequency");
+
+        result
     }
 }
 
@@ -620,10 +647,10 @@ impl Device {
         Resource(ComPtr::from_raw(resource))
     }
 
-    pub unsafe fn create_query_heap(&self, heap_type: d3d12::D3D12_QUERY_HEAP_TYPE) -> QueryHeap {
+    pub unsafe fn create_query_heap(&self, heap_type: d3d12::D3D12_QUERY_HEAP_TYPE, num_expected_queries: u32) -> QueryHeap {
         let query_heap_desc = d3d12::D3D12_QUERY_HEAP_DESC {
             Type: heap_type,
-            Count: 1,
+            Count: num_expected_queries,
             NodeMask: 0,
         };
 

@@ -74,6 +74,123 @@ fn materialize_paint_kernel_code(paint_num_pixels_per_tg_x: u32, paint_num_pixel
     std::fs::write(shader_path, step2).expect("shader template could not be materialized");
 }
 
+enum TimePoints {
+    BeginCmd,
+    PtclInitComplete,
+    PtclDispatch,
+    PtclBufferSync,
+    PaintInitComplete,
+    PaintDispatch,
+    CanvasBufferSync,
+    DrawInitComplete,
+    Draw,
+    EndCmd,
+    Count,
+}
+
+struct TimingData {
+    begin_cmd_tps: Vec<f64>,
+    ptcl_init_complete_ts: Vec<f64>,
+    ptcl_dispatch_ts: Vec<f64>,
+    ptcl_buf_sync_ts: Vec<f64>,
+    paint_init_complete_ts: Vec<f64>,
+    paint_dispatch_ts: Vec<f64>,
+    canvas_buf_sync_ts: Vec<f64>,
+    draw_init_complete_ts: Vec<f64>,
+    draw_ts: Vec<f64>,
+    end_cmd_ts: Vec<f64>,
+}
+
+fn interpret_timing_data_in_ms(num_renders: usize, tick_period_in_seconds: f64, raw_timing_data: Vec<u64>) -> TimingData {
+    let tick0 = raw_timing_data[0];
+    let tick_period_in_ms = tick_period_in_seconds*1000.0;
+    let timing_data_in_ms = raw_timing_data.iter().map(|ticks| (*ticks as f64)*tick_period_in_ms).collect::<Vec<f64>>();
+
+    let mut begin_cmd_tps = Vec::<f64>::new();
+    let mut ptcl_init_complete_ts = Vec::<f64>::new();
+    let mut ptcl_dispatch_ts = Vec::<f64>::new();
+    let mut ptcl_buf_sync_ts = Vec::<f64>::new();
+    let mut paint_init_complete_ts = Vec::<f64>::new();
+    let mut paint_dispatch_ts = Vec::<f64>::new();
+    let mut canvas_buf_sync_ts= Vec::<f64>::new();
+    let mut draw_init_complete_ts= Vec::<f64>::new();
+    let mut draw_ts= Vec::<f64>::new();
+    let mut end_cmd_ts = Vec::<f64>::new();
+
+    let tp_count = TimePoints::Count as usize;
+    let ptcl_init_complete_offset = TimePoints::PtclInitComplete as usize;
+    let ptcl_dispatch_offset = TimePoints::PtclDispatch as usize;
+    let ptcl_buf_sync_offset = TimePoints::PtclBufferSync as usize;
+    let paint_init_complete_offset = TimePoints::PaintInitComplete as usize;
+    let paint_dispatch_offset = TimePoints::PaintDispatch as usize;
+    let canvas_buf_sync_offset = TimePoints::CanvasBufferSync as usize;
+    let draw_init_complete_offset = TimePoints::DrawInitComplete as usize;
+    let draw_offset = TimePoints::Draw as usize;
+    let end_cmd_offset = TimePoints::EndCmd as usize;
+
+    for i in 0..num_renders {
+        let ix = i*tp_count;
+
+        let (
+            begin_cmd_tp,
+            ptcl_init_complete_tp,
+            ptcl_dispatch_tp,
+            ptcl_buf_sync_tp,
+            paint_init_complete_tp,
+            paint_dispatch_tp,
+            canvas_buf_sync_tp,
+            draw_init_complete_tp,
+            draw_tp,
+            end_cmd_tp
+        ) = (timing_data_in_ms[ix],
+             timing_data_in_ms[ix + ptcl_init_complete_offset],
+             timing_data_in_ms[ix + ptcl_dispatch_offset],
+             timing_data_in_ms[ix + ptcl_buf_sync_offset],
+             timing_data_in_ms[ix + paint_init_complete_offset],
+             timing_data_in_ms[ix + paint_dispatch_offset],
+             timing_data_in_ms[ix + canvas_buf_sync_offset],
+             timing_data_in_ms[ix + draw_init_complete_offset],
+             timing_data_in_ms[ix + draw_offset],
+             timing_data_in_ms[ix + end_cmd_offset],
+        );
+
+        begin_cmd_tps.push(begin_cmd_tp);
+        ptcl_init_complete_ts.push(ptcl_init_complete_tp - begin_cmd_tp);
+        ptcl_dispatch_ts.push(ptcl_dispatch_tp - ptcl_init_complete_tp);
+        ptcl_buf_sync_ts.push(ptcl_buf_sync_tp - ptcl_dispatch_tp);
+        paint_init_complete_ts.push(paint_init_complete_tp - ptcl_buf_sync_tp);
+        paint_dispatch_ts.push(paint_dispatch_tp - paint_init_complete_tp);
+        canvas_buf_sync_ts.push(canvas_buf_sync_tp - paint_dispatch_tp);
+        draw_init_complete_ts.push(draw_init_complete_tp - canvas_buf_sync_tp);
+        draw_ts.push(draw_tp - draw_init_complete_tp);
+        end_cmd_ts.push(end_cmd_tp - draw_tp);
+    }
+
+    TimingData {
+        begin_cmd_tps,
+        ptcl_init_complete_ts,
+        ptcl_dispatch_ts,
+        ptcl_buf_sync_ts,
+        paint_init_complete_ts,
+        paint_dispatch_ts,
+        canvas_buf_sync_ts,
+        draw_init_complete_ts,
+        draw_ts,
+        end_cmd_ts,
+    }
+}
+
+fn average_f64s(count: usize, input_data: &[f64]) -> f64 {
+    let mut sum: f64 = 0.0;
+    let num_elements: f64 = count as f64;
+
+    for i in 0..count {
+        sum += input_data[i];
+    }
+
+    return sum/num_elements;
+}
+
 pub struct GpuState {
     width: u32,
     height: u32,
@@ -118,6 +235,7 @@ pub struct GpuState {
 
     query_heap: dx12::QueryHeap,
     timing_query_buffer: dx12::Resource,
+    num_renders: u32,
 }
 
 impl GpuState {
@@ -132,6 +250,7 @@ impl GpuState {
         per_tile_command_lists_num_tiles_per_tg_y: u32,
         paint_num_tiles_per_tg_x: u32,
         paint_num_tiles_per_tg_y: u32,
+        num_renders: u32,
     ) -> GpuState {
         let width = wnd.get_width();
         let height = wnd.get_height();
@@ -292,8 +411,8 @@ impl GpuState {
             canvas_quad,
         );
 
-        let query_heap = device.create_query_heap(d3d12::D3D12_QUERY_HEAP_TYPE_TIMESTAMP);
-        let timing_query_buffer = GpuState::create_timing_query_buffer(device.clone());
+        let query_heap = device.create_query_heap(d3d12::D3D12_QUERY_HEAP_TYPE_TIMESTAMP, num_renders*(TimePoints::Count as u32));
+        let timing_query_buffer = GpuState::create_timing_query_buffer(device.clone(), num_renders);
 
         let mut gpu_state = GpuState {
             width,
@@ -338,6 +457,8 @@ impl GpuState {
             fence_values: (0..FRAME_COUNT).into_iter().map(|_| 1).collect(),
 
             query_heap,
+            timing_query_buffer,
+            num_renders,
         };
 
         // wait for upload of any resources to gpu
@@ -346,15 +467,9 @@ impl GpuState {
         gpu_state
     }
 
-    unsafe fn populate_command_list(&mut self) {
-        let timing_query_index: u32 = 0;
+    unsafe fn populate_command_list(&mut self, render_index: u32) {
+        let offset = render_index*(TimePoints::Count as u32);
 
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
-            
         self.command_allocators[self.frame_index].reset();
 
         // per tile command list generation call
@@ -362,6 +477,9 @@ impl GpuState {
             self.command_allocators[self.frame_index].clone(),
             self.per_tile_command_lists_pipeline_state.clone(),
         );
+
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::BeginCmd as u32  + offset);
+
 
         self.command_list
             .set_compute_root_signature(self.per_tile_command_lists_root_signature.clone());
@@ -373,14 +491,15 @@ impl GpuState {
                 .get_gpu_descriptor_handle_at_offset(0),
         );
 
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PtclInitComplete as u32  + offset);
+
+        //panic!("stop");
+
         self.command_list
             .dispatch(self.num_ptcl_tg_x, self.num_ptcl_tg_y, 1);
 
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
+
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PtclDispatch as u32  + offset);
 
         // need to ensure all writes to per_tile_command_lists are complete before any reads are done
         let synchronize_wrt_per_tile_command_lists =
@@ -388,11 +507,8 @@ impl GpuState {
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_per_tile_command_lists]);
 
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
+
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PtclBufferSync as u32  + offset);
 
         // paint call
         self.command_list
@@ -407,14 +523,13 @@ impl GpuState {
                 .get_gpu_descriptor_handle_at_offset(0),
         );
 
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PaintInitComplete as u32  + offset);
+
         self.command_list
             .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
 
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PaintDispatch as u32  + offset);
+
 
         // need to ensure all writes to intermediate are complete before any reads are done
         let synchronize_wrt_canvas =
@@ -422,12 +537,9 @@ impl GpuState {
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_canvas]);
 
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
 
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::CanvasBufferSync as u32  + offset);
+            
         // graphics pipeline call
         self.command_list
             .set_pipeline_state(self.graphics_pipeline_state.clone());
@@ -442,12 +554,7 @@ impl GpuState {
         );
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
-
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
+        
         let transition_render_target_from_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
@@ -455,11 +562,8 @@ impl GpuState {
         );
         self.command_list
             .set_resource_barrier(vec![transition_render_target_from_present]);
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
+
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::DrawInitComplete as u32  + offset);
         
         let mut rt_descriptor = self
             .rtv_descriptor_heap
@@ -475,11 +579,8 @@ impl GpuState {
             .set_vertex_buffer(0, 1, &self.vertex_buffer_view);
         self.command_list.draw_instanced(4, 1, 0, 0);
 
-        #[cfg(debug_assertions)]
-        {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            timing_query_index += 1;
-        }
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::Draw as u32  + offset);
+        
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -487,10 +588,19 @@ impl GpuState {
         );
         self.command_list
             .set_resource_barrier(vec![transition_render_target_to_present]);
-        #[cfg(debug_assertions)]
+
+        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::EndCmd as u32  + offset);
+
+        if (render_index == (self.num_renders - 1))
         {
-            self.command_list.end_timing_query(self.query_heap.unwrap().clone(), timing_query_index);
-            self.command_list.resolve_timing_query_data(self.query_heap.unwrap().clone(), 0, timing_query_index + 1, self.timing_query_buffer, 0);
+            self.command_list.resolve_timing_query_data(self.query_heap.clone(), 0, self.num_renders*(TimePoints::Count as u32), self.timing_query_buffer.clone(), 0);
+//            let transition_timing_query_heap_to_read = dx12::create_transition_resource_barrier(
+//                self.timing_query_buffer.0.as_raw(),
+//                d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
+//                d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+//            );
+//            self.command_list
+//                .set_resource_barrier(vec![transition_timing_query_heap_to_read]);
         }
         
         self.command_list.close();
@@ -501,8 +611,8 @@ impl GpuState {
             .execute_command_lists(1, &[self.command_list.as_raw_list()]);
     }
 
-    pub unsafe fn render(&mut self) {
-        self.populate_command_list();
+    pub unsafe fn render(&mut self, render_index: u32) {
+        self.populate_command_list(render_index);
 
         self.execute_command_list();
 
@@ -1341,7 +1451,7 @@ impl GpuState {
             paint_root_signature,
             paint_pipeline_state,
         ) = GpuState::create_compute_pipeline_states(
-            device,
+            device.clone(),
             ptcl_kernel_path,
             paint_kernel_path,
             shader_compile_flags,
@@ -1351,7 +1461,7 @@ impl GpuState {
 
         let (graphics_root_signature, graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
             GpuState::create_graphics_pipeline_state(
-                device,
+                device.clone(),
                 vertex_shader_path,
                 fragment_shader_path,
                 shader_compile_flags,
@@ -1384,8 +1494,8 @@ impl GpuState {
     }
 
     unsafe fn create_timing_query_buffer(device: dx12::Device, num_expected_results: u32) -> dx12::Resource {
-        let size_in_bytes = mem::size_of::<u32>()*(num_expected_results as u32);
-        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+        let size_in_bytes = mem::size_of::<u64>()*((num_expected_results*(TimePoints::Count as u32)) as usize);
+        let timing_query_buffer_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
             Width: size_in_bytes as u64,
             Height: 1,
@@ -1399,9 +1509,10 @@ impl GpuState {
             Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
             ..mem::zeroed()
         };
-        let constants_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        let timing_query_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            Type: d3d12::D3D12_HEAP_TYPE_READBACK,
+            //TODO: what should CPUPageProperty flag be?
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
             //TODO: what should MemoryPoolPreference flag be?
             MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
@@ -1409,15 +1520,33 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let constants_buffer = device.create_committed_resource(
-            &constants_buffer_heap_properties,
+        let resource_buffer = device.create_committed_resource(
+            &timing_query_buffer_heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &constants_buffer_resource_description,
-            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            &timing_query_buffer_description,
+            d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
             ptr::null(),
         );
 
-        device.create_committed_resource(heap_properties, flags, &resource_description, initial_resource_state, ptr::null())
+        device.create_committed_resource(&timing_query_buffer_heap_properties, d3d12::D3D12_HEAP_FLAG_NONE, &timing_query_buffer_description, d3d12::D3D12_RESOURCE_STATE_COPY_DEST, ptr::null())
+    }
+
+    pub unsafe fn print_stats(&mut self) {
+        self.wait_for_gpu();
+
+        let raw_timing_data: Vec<u64> = self.timing_query_buffer.download_data_from_resource::<u64>((self.num_renders * TimePoints::Count as u32) as usize);
+        let tick_period_in_seconds = 1.0/(self.command_queue.get_timestamp_frequency() as f64);
+
+        let num_timepoints = (TimePoints::Count as u32) as f64;
+        let num_recorded_renders = (raw_timing_data.len() as f64)/num_timepoints;
+        //assert_eq!(self.num_renders, num_recorded_renders);
+        println!("num_recorded_renders: {}", num_recorded_renders);
+
+        println!("num recorded renders: {}", num_recorded_renders);
+        let timing_data = interpret_timing_data_in_ms(self.num_renders as usize, tick_period_in_seconds, raw_timing_data);
+        println!("average ptcl dispatch time (ms): {}", average_f64s(timing_data.ptcl_dispatch_ts.len(), &timing_data.ptcl_dispatch_ts));
+        println!("average paint dispatch time (ms): {}", average_f64s(timing_data.paint_dispatch_ts.len(), &timing_data.paint_dispatch_ts));
+        println!("average draw time (ms): {}", average_f64s(timing_data.draw_ts.len(), &timing_data.draw_ts));
     }
 }

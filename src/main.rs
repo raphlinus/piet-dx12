@@ -25,6 +25,7 @@ fn main() {
         let mut wnd =
             window::Window::new(win32_string("test"), win32_string("test"));
 
+        let num_renders: u32 = 1000;
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
             String::from("build_per_tile_command_list"),
@@ -36,15 +37,14 @@ fn main() {
             1,
             1,
             1,
+            num_renders,
         );
 
-        loop {
-            if window::quit(&mut wnd) {
-                gpu_state.destroy();
-                break;
-            } else {
-                gpu_state.render();
-            }
+        for i in 0..num_renders {
+            gpu_state.render(i);
         }
+
+        gpu_state.print_stats();
+        gpu_state.destroy();
     }
 }
