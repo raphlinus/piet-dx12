@@ -30,24 +30,50 @@ uint4 extract_u8s_from_uint(uint input_value) {
     return result;
 }
 
-uint4 load_bbox_at_index(uint ix) {
-    uint x_address = ix*8;
+uint2 load_packed_bbox_at_index(uint ix) {
+    uint x_address = ix*16 + 4;
     uint y_address = x_address + 4;
 
-    uint packed_bbox_x = circle_bbox_buffer.Load(x_address);
-    uint packed_bbox_y = circle_bbox_buffer.Load(y_address);
+    uint packed_bbox_x = object_data_buffer.Load(x_address);
+    uint packed_bbox_y = object_data_buffer.Load(y_address);
 
-    uint2 bbox_x = extract_ushort2_from_uint(packed_bbox_x);
-    uint2 bbox_y = extract_ushort2_from_uint(packed_bbox_y);
+    uint2 packed_bbox = {packed_bbox_x, packed_bbox_y};
+
+    return packed_bbox;
+}
+
+uint4 unpack_bbox(uint2 packed_bbox) {
+    uint2 bbox_x = extract_ushort2_from_uint(packed_bbox.x);
+    uint2 bbox_y = extract_ushort2_from_uint(packed_bbox.y);
 
     uint4 bbox = {bbox_x, bbox_y};
 
     return bbox;
 }
 
-float4 load_color_at_index(uint ix) {
-    uint address = ix*4;
-    uint packed_color = circle_color_buffer.Load(address);
+uint load_packed_object_specific_data_at_index(uint ix) {
+    uint data_address = ix*16;
+
+    uint packed_data = object_data_buffer.Load(data_address);
+
+    return packed_data;
+}
+
+uint2 unpack_object_specific_data(uint packed_data) {
+    uint2 unpacked_data = extract_ushort2_from_uint(packed_data);
+
+    return unpacked_data;
+}
+
+uint load_packed_color_at_index(uint ix) {
+    uint color_address = ix*16 + 12;
+
+    uint packed_color = object_data_buffer.Load(address);
+
+    return packed_color;
+}
+
+float4 unpack_color(uint packed_color) {
     uint4 int_colors = extract_u8s_from_uint(packed_color);
     float4 float_int_colors = int_colors;
 
@@ -58,4 +84,9 @@ float4 load_color_at_index(uint ix) {
 
     float4 result = {r, g, b, a};
     return result;
+}
+
+uint4 repack_command(uint packed_object_specific_data, uint2 packed_bbox, uint packed_color) {
+    uint4 command = {packed_object_specific_data, packed_bbox, packed_color};
+    return command;
 }

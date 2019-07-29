@@ -1,29 +1,43 @@
 cbuffer Constants : register(b0)
 {
-	uint num_circles;
+	uint num_objects;
 	uint tile_size;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
-ByteAddressBuffer circle_bbox_buffer : register(t0);
-ByteAddressBuffer circle_color_buffer : register(t1);
+ByteAddressBuffer object_data_buffer : register(t0);
+ByteAddressBuffer object_color_buffer : register(t1);
+Texture2D<float4> glyphs[10] : register(t2);
+SamplerState glyphs_sampler : register(s0);
 
 RWByteAddressBuffer per_tile_command_list: register(u0);
 RWTexture2D<float4> canvas : register(u1);
 
 float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
     float d = distance(pixel_pos, center_pos);
-    float alpha = clamp(radius - d, 0.0f, 1.0f);
+    float alpha = clamp(radius - d, 0.0, 1.0);
     return alpha;
 }
 
 float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, float4 circle_color) {
-    uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5f), lerp(circle_bbox[2], circle_bbox[3], 0.5f)};
-    float radius = (circle_bbox[1] - circle_bbox[0])*0.5f;
+    uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5), lerp(circle_bbox[2], circle_bbox[3], 0.5)};
+    float radius = (circle_bbox[1] - circle_bbox[0])*0.5;
     float position_based_alpha = circle_shader(pixel_pos, circle_center, radius);
 
     float4 pixel_color = {circle_color.r, circle_color.g, circle_color.b, circle_color.a*position_based_alpha};
+    return pixel_color;
+}
+
+float4 calculate_pixel_color_due_to_glyph(uint2 pixel_pos, uint glyph_address, uint4 glyph_bbox, float4 color) {
+    float4 gather_result = glyphs[NonUniformResourceIndex(glyph_address)].GatherAlpha(sampler, pixel_pos).w;
+    float glyph_alpha = gather_result.a;
+    float4 pixel_color = {0.0, 0.0, 0.0, 0.0};
+
+    if (glyph_alpha > 0.0) {
+        float4 pixel_color = {color.r, color.g, color.b, color.a*glyph_alpha};
+    }
+
     return pixel_color;
 }
 
@@ -207,7 +221,7 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     float result = 0.0;
 
     while (1) {
-        uint digit = round(fmod(fnumber, 10.0f));
+        uint digit = round(fmod(fnumber, 10.0));
 
         result = digit_display_shader(digit, pixel_pos, display_origin, size);
 
@@ -215,10 +229,10 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
             break;
         }
 
-        fnumber = trunc(fnumber/10.0f);
+        fnumber = trunc(fnumber/10.0);
         display_origin.x = display_origin.x - delta;
 
-        if (fnumber == 0.0f) {
+        if (fnumber == 0.0) {
             break;
         }
     }
@@ -226,49 +240,52 @@ float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uin
     return result;
 }
 
-uint unpack_command(uint command_address) {
-    return per_tile_command_list.Load(command_address);
-}
-
 [numthreads(~P_X~, ~P_Y~, 1)]
 void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
-    float4 bg = {0.0f, 0.0f, 0.0f, 0.0f};
-    float4 fg = {0.0f, 0.0f, 0.0f, 0.0f};
+    float4 bg = {0.0, 0.0, 0.0, 0.0};
+    float4 fg = {0.0, 0.0, 0.0, 0.0};
 
     uint2 pixel_pos = DTid.xy;
 
-    // // uint casting is same as flooring (in general, casting is round to zero)
-    uint tile_ix = Gid.y*num_tiles_x + Gid.x;
-    uint command_address = num_circles*tile_ix*4;
-    uint max_uint = 4294967295;
+    // uint casting is same as flooring (in general, casting is round to zero)
+    uint linear_tile_ix = Gid.y*num_tiles_x + Gid.x;
+    uint size_of_command_list = 4 + num_objects*object_size;
+    uint init_address = size_of_command_list*linear_tile_ix;
 
-    for (uint i = 0; i < num_circles; i++) {
-        // do we want object index, bbox loading, color loading etc. to be in thread group shared memory?
-        uint object_index = unpack_command(command_address);
+    uint this_tile_num_commands = per_tile_command_list.Load(init_address);
 
-        if (object_index == max_uint) {
-            break;
-        } else {
-            uint4 bbox = load_bbox_at_index(object_index);
-            bool hit = is_pixel_in_bbox(pixel_pos, bbox);
+    for (uint i = 0; i < this_tile_num_commands; i++) {
+        uint command_address = i*object_size + init_adddress + 4;
+        uint4 packed_command = per_tile_command_list.Load4(address);
+        uint2 packed_bbox_data = packed_command.yz;
 
-            if (hit) {
-                float4 color = load_color_at_index(object_index);
+        uint4 bbox = unpack_bbox(packed_bbox_data);
+        bool hit = is_pixel_in_bbox(pixel_pos, bbox);
+
+        if (hit) {
+            uint packed_object_specific_data = packed_command.x;
+            uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
+            uint object_type = object_specific_data.x;
+            uint glyph_address = object_specific_data.y;
+            float4 color = unpack_color(packed_command.w);
+
+            float4 fg = {0.0, 0.0, 0.0, 0.0};
+            if (object_type == 0) {
                 float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
-                bg = blend_pd_over(bg, fg);
-            }
-            //float4 fg = {0.5f, 0.5f, 0.5f, 1.0f};
-            //bg = blend_pd_over(bg, fg);
-        }
 
-        command_address += 4;
+            } else {
+                float4 fg = calculate_pixel_color_due_to_glyph(pixel_pos, glyph_address, bbox, color);
+            }
+
+            bg = blend_pd_over(bg, fg);
+        }
     }
 
     // // boolean value display
     // bool test = (value == 6553800);
     // uint4 test_bbox = {100, 200, 100, 200};
-    // float4 test_success_color = {0.0f, 1.0f, 0.0f, 1.0f};
-    // float4 test_fail_color = {1.0f, 0.0f, 0.0f, 1.0f};
+    // float4 test_success_color = {0.0, 1.0, 0.0, 1.0};
+    // float4 test_fail_color = {1.0, 0.0, 0.0, 1.0};
 
     // if (test) {
     //     fg = calculate_pixel_color_due_to_circle(pixel_pos, test_bbox, test_success_color);
@@ -279,9 +296,9 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     // unsigned integer value display
     // uint2 rect_origin = {800, 300};
     // uint2 rect_size = {50, 10};
-    // fg.r = 1.0f;
-    // fg.g = 1.0f;
-    // fg.b = 1.0f;
+    // fg.r = 1.0;
+    // fg.g = 1.0;
+    // fg.b = 1.0;
     // // should print out 6553800
     // uint4 bbox0 = {0, 100, 0, 100};
     // uint4 bbox1 = generate_tile_bbox(66);

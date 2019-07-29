@@ -10,74 +10,67 @@ use std::io::Cursor;
 pub unsafe fn create_random_scene(
     screen_width: u32,
     screen_height: u32,
-    num_circles: u32,
-) -> (Vec<u8>, Vec<u8>) {
+    num_objects: u32,
+) -> Vec<u8> {
     let mut rng = rand::thread_rng();
 
-    let mut bbox_data: Vec<u8> = Vec::new();
-    let mut color_data: Vec<u8> = Vec::new();
+    let mut object_data: Vec<u8> = Vec::new();
 
-    for n in 0..num_circles {
-        let diameter: u16 = rng.gen_range(20, 200);
-        let bbox_min_x: u16 = rng.gen_range(0, screen_width as u16);
-        let bbox_min_y: u16 = rng.gen_range(0, screen_height as u16);
+    for n in 0..num_objects {
+        let object_type: u16 = rng.gen_range(0, 2);
+
+        let bbox_min_x = rng.gen_range(0, screen_width as u16);
+        let bbox_min_y = rng.gen_range(0, screen_height as u16);
+
+        let diameter: u16 = {
+            if (object_type == 0) {
+                rng.gen_range(20, 200)
+            } else {
+                100
+            }
+        };
+
+        if (object_type == 1) {
+            // digit to print
+            object_data
+                .write_u16::<LittleEndian>(rng.gen_range(0, 10))
+                .expect("could not convert u32 to bytes");
+            object_data
+                .write_u16::<LittleEndian>(object_type)
+                .expect("could not convert u32 to bytes");
+        } else {
+            // circle, so no digit data
+            object_data
+                .write_u16::<LittleEndian>(0)
+                .expect("could not convert u32 to bytes");
+            object_data
+                .write_u16::<LittleEndian>(object_type)
+                .expect("could not convert u32 to bytes");
+        }
 
         // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-        bbox_data
+        object_data
             .write_u16::<LittleEndian>(bbox_min_x + diameter)
             .expect("could not convert u16 to bytes");
-        bbox_data
+        object_data
             .write_u16::<LittleEndian>(bbox_min_x)
             .expect("could not convert u16 to bytes");
 
         // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
-        bbox_data
+        object_data
             .write_u16::<LittleEndian>(bbox_min_y + diameter)
             .expect("could not convert u16 to bytes");
-        bbox_data
+        object_data
             .write_u16::<LittleEndian>(bbox_min_y)
             .expect("could not convert u16 to bytes");
 
+        // order doesn't matter for randomly generated color values;
+        // for real color values order will have to be reversed
         for i in 0..4 {
-            color_data.push(rng.gen());
+            object_data.push(rng.gen());
         }
     }
 
-    // order doesn't matter for randomly generated color values; for real color values order will have to be reversed
-    (bbox_data, color_data)
+    object_data
 }
 
-pub unsafe fn create_constant_scene(
-) -> (Vec<u8>, Vec<u8>) {
-    let mut rng = rand::thread_rng();
-
-    let mut bbox_data: Vec<u8> = Vec::new();
-    let mut color_data: Vec<u8> = Vec::new();
-
-    let diameter: u16 = 100;
-    let bbox_min_x: u16 = 0;
-    let bbox_min_y: u16 = 0;
-
-    // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-    bbox_data
-        .write_u16::<LittleEndian>(bbox_min_x + diameter)
-        .expect("could not convert u16 to bytes");
-    bbox_data
-        .write_u16::<LittleEndian>(bbox_min_x)
-        .expect("could not convert u16 to bytes");
-
-    // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
-    bbox_data
-        .write_u16::<LittleEndian>(bbox_min_y + diameter)
-        .expect("could not convert u16 to bytes");
-    bbox_data
-        .write_u16::<LittleEndian>(bbox_min_y)
-        .expect("could not convert u16 to bytes");
-
-    // order doesn't matter for randomly generated color values; for real color values order will have to be reversed
-    for i in 0..4 {
-        color_data.push(255);
-    }
-
-    (bbox_data, color_data)
-}

@@ -218,7 +218,7 @@ pub struct GpuState {
 
     compute_descriptor_heap: dx12::DescriptorHeap,
     constants_buffer: dx12::Resource,
-    circle_bbox_buffer: dx12::Resource,
+    object_data_buffer: dx12::Resource,
     circle_color_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
     canvas_texture: dx12::Resource,
@@ -254,9 +254,9 @@ impl GpuState {
     ) -> GpuState {
         let width = wnd.get_width();
         let height = wnd.get_height();
-        let num_circles = 1000;
-        let (bbox_data, color_data) = scene::create_random_scene(width, height, num_circles);
-//        let num_circles = 1;
+        let num_objects = 1000;
+        let (bbox_data, color_data) = scene::create_random_scene(width, height, num_objects);
+//        let num_objects = 1;
 //        let (bbox_data, color_data) = scene::create_constant_scene();
 
         let f_tile_side_length_in_pixels = tile_side_length_in_pixels as f32;
@@ -371,7 +371,7 @@ impl GpuState {
         let (
             compute_descriptor_heap,
             constants_buffer,
-            circle_bbox_buffer,
+            object_data_buffer,
             circle_color_buffer,
             per_tile_command_lists_buffer,
             canvas_texture,
@@ -379,7 +379,7 @@ impl GpuState {
             device.clone(),
             width,
             height,
-            num_circles,
+            num_objects,
             num_tiles_x,
             num_tiles_y,
             tile_side_length_in_pixels,
@@ -441,7 +441,7 @@ impl GpuState {
 
             compute_descriptor_heap,
             constants_buffer,
-            circle_bbox_buffer,
+            object_data_buffer,
             circle_color_buffer,
             per_tile_command_lists_buffer,
             canvas_texture,
@@ -777,7 +777,7 @@ impl GpuState {
         device: dx12::Device,
         width: u32,
         height: u32,
-        num_circles: u32,
+        num_objects: u32,
         num_tiles_x: u32,
         num_tiles_y: u32,
         tile_side_length_in_pixels: u32,
@@ -801,7 +801,7 @@ impl GpuState {
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
         // create constants buffer
-        let constants = [num_circles, tile_side_length_in_pixels, num_tiles_x, num_tiles_y];
+        let constants = [num_objects, tile_side_length_in_pixels, num_tiles_x, num_tiles_y];
         let constant_buffer_stride = mem::size_of::<u32>();
         let constant_buffer_size = constant_buffer_stride * constants.len();
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -846,9 +846,9 @@ impl GpuState {
         );
 
         // create circle bbox buffer
-        let circle_bbox_buffer_size_in_bytes = bbox_data.len();
-        let circle_bbox_buffer_size_in_u32s = (circle_bbox_buffer_size_in_bytes/mem::size_of::<u32>()) as u32;
-        let circle_bbox_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        let object_data_buffer_size_in_bytes = bbox_data.len();
+        let object_data_buffer_size_in_u32s = (object_data_buffer_size_in_bytes/mem::size_of::<u32>()) as u32;
+        let object_data_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
             //TODO: what should MemoryPoolPreference flag be?
@@ -857,9 +857,9 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let circle_bbox_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
+        let object_data_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: circle_bbox_buffer_size_in_bytes as u64,
+            Width: object_data_buffer_size_in_bytes as u64,
             Height: 1,
             DepthOrArraySize: 1,
             MipLevels: 1,
@@ -871,7 +871,7 @@ impl GpuState {
             Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
             ..mem::zeroed()
         };
-        let circle_bbox_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+        let object_data_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -881,20 +881,20 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let circle_bbox_buffer = device.create_committed_resource(
-            &circle_bbox_buffer_heap_properties,
+        let object_data_buffer = device.create_committed_resource(
+            &object_data_buffer_heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &circle_bbox_buffer_resource_description,
+            &object_data_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        circle_bbox_buffer.upload_data_to_resource(bbox_data.len(), bbox_data.as_ptr());
+        object_data_buffer.upload_data_to_resource(bbox_data.len(), bbox_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
-            circle_bbox_buffer.clone(),
+            object_data_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
             0,
-            circle_bbox_buffer_size_in_u32s,
+            object_data_buffer_size_in_u32s,
         );
 
         // create circle color buffer
@@ -961,7 +961,7 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let per_tile_command_list_buffer_size_in_u32s = num_circles * num_tiles_x * num_tiles_y;
+        let per_tile_command_list_buffer_size_in_u32s = num_objects * num_tiles_x * num_tiles_y;
         let per_tile_command_list_buffer_size = (mem::size_of::<u32>() as u64) * (per_tile_command_list_buffer_size_in_u32s as u64);
         assert!(
             per_tile_command_list_buffer_size < (std::u32::MAX as u64),
@@ -1045,7 +1045,7 @@ impl GpuState {
         (
             compute_descriptor_heap,
             constants_buffer,
-            circle_bbox_buffer,
+            object_data_buffer,
             circle_color_buffer,
             per_tile_command_lists,
             canvas,
