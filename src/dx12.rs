@@ -1,6 +1,7 @@
 extern crate winapi;
 extern crate wio;
 
+use self::winapi::um::d3dcommon::ID3DBlob;
 use crate::error;
 use crate::error::error_if_failed_else_unit;
 use std::os::windows::ffi::OsStrExt;
@@ -9,7 +10,6 @@ use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, win
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, d3dcompiler, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
-use self::winapi::um::d3dcommon::ID3DBlob;
 
 // everything is ripped from d3d12-rs, but wio::com::ComPtr, and winapi are used more directly
 
@@ -104,16 +104,23 @@ impl Resource {
     pub unsafe fn download_data_from_resource<T>(&self, count: usize) -> Vec<T> {
         let data_size_in_bytes = mem::size_of::<T>();
         let mut mapped_memory = ptr::null_mut();
-        let zero_range = d3d12::D3D12_RANGE { Begin: 0, End: data_size_in_bytes*count, };
+        let zero_range = d3d12::D3D12_RANGE {
+            Begin: 0,
+            End: data_size_in_bytes * count,
+        };
         error::error_if_failed_else_unit(self.0.Map(
             0,
             &zero_range as *const _,
             &mut mapped_memory as *mut _ as *mut _,
         ))
-            .expect("could not map GPU mem to CPU mem");
+        .expect("could not map GPU mem to CPU mem");
         let mut result: Vec<T> = Vec::new();
         result.reserve(count);
-        ptr::copy(mapped_memory as *const T, result.as_mut_ptr() as *mut T, count);
+        ptr::copy(
+            mapped_memory as *const T,
+            result.as_mut_ptr() as *mut T,
+            count,
+        );
         result.set_len(count);
         self.0.Unmap(0, ptr::null());
 
@@ -193,7 +200,8 @@ impl CommandQueue {
     pub unsafe fn get_timestamp_frequency(&self) -> u64 {
         let mut result: u64 = 0;
 
-        error_if_failed_else_unit(self.0.GetTimestampFrequency(&mut result as *mut _)).expect("could not get timestamp frequency");
+        error_if_failed_else_unit(self.0.GetTimestampFrequency(&mut result as *mut _))
+            .expect("could not get timestamp frequency");
 
         result
     }
@@ -599,6 +607,28 @@ impl Device {
             .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
     }
 
+    pub unsafe fn create_texture2D_shader_resource_view(
+        &self,
+        resource: Resource,
+        format: dxgiformat::DXGI_FORMAT,
+        descriptor: CpuDescriptor,
+    ) {
+        let mut srv_desc = d3d12::D3D12_SHADER_RESOURCE_VIEW_DESC {
+            Format: format,
+            ViewDimension: d3d12::D3D12_SRV_DIMENSION_TEXTURE2D,
+            Shader4ComponentMapping: 0x1688,
+            ..mem::zeroed()
+        };
+        *srv_desc.u.Texture2D_mut() = d3d12::D3D12_TEX2D_SRV {
+            MostDetailedMip: 0,
+            MipLevels: 1,
+            PlaneSlice: 0,
+            ResourceMinLODClamp: 0.0,
+        };
+        self.0
+            .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
+    }
+
     pub unsafe fn create_render_target_view(
         &self,
         resource: Resource,
@@ -647,7 +677,11 @@ impl Device {
         Resource(ComPtr::from_raw(resource))
     }
 
-    pub unsafe fn create_query_heap(&self, heap_type: d3d12::D3D12_QUERY_HEAP_TYPE, num_expected_queries: u32) -> QueryHeap {
+    pub unsafe fn create_query_heap(
+        &self,
+        heap_type: d3d12::D3D12_QUERY_HEAP_TYPE,
+        num_expected_queries: u32,
+    ) -> QueryHeap {
         let query_heap_desc = d3d12::D3D12_QUERY_HEAP_DESC {
             Type: heap_type,
             Count: num_expected_queries,
@@ -660,7 +694,8 @@ impl Device {
             &query_heap_desc as *const _,
             &d3d12::ID3D12QueryHeap::uuidof(),
             &mut query_heap as *mut _ as *mut _,
-        )).expect("could not create query heap");
+        ))
+        .expect("could not create query heap");
 
         QueryHeap(ComPtr::from_raw(query_heap))
     }
@@ -796,8 +831,7 @@ impl ShaderByteCode {
         flags: minwindef::DWORD,
     ) -> Blob {
         let file_open_error = format!("could not open shader source file for entry: {}", &entry);
-        let source = std::fs::read_to_string(file_path)
-            .expect(&file_open_error);
+        let source = std::fs::read_to_string(file_path).expect(&file_open_error);
 
         ShaderByteCode::compile(source, target, entry, flags)
     }
@@ -985,11 +1019,29 @@ impl GraphicsCommandList {
     }
 
     pub unsafe fn end_timing_query(&self, query_heap: QueryHeap, index: u32) {
-        self.0.EndQuery(query_heap.0.as_raw() as *mut _, d3d12::D3D12_QUERY_TYPE_TIMESTAMP, index);
+        self.0.EndQuery(
+            query_heap.0.as_raw() as *mut _,
+            d3d12::D3D12_QUERY_TYPE_TIMESTAMP,
+            index,
+        );
     }
 
-    pub unsafe fn resolve_timing_query_data(&self, query_heap: QueryHeap, start_index: u32, num_queries: u32, destination_buffer: Resource, aligned_destination_buffer_offset: u64) {
-        self.0.ResolveQueryData(query_heap.0.as_raw() as *mut _, d3d12::D3D12_QUERY_TYPE_TIMESTAMP, start_index, num_queries, destination_buffer.0.as_raw() as *mut _, aligned_destination_buffer_offset);
+    pub unsafe fn resolve_timing_query_data(
+        &self,
+        query_heap: QueryHeap,
+        start_index: u32,
+        num_queries: u32,
+        destination_buffer: Resource,
+        aligned_destination_buffer_offset: u64,
+    ) {
+        self.0.ResolveQueryData(
+            query_heap.0.as_raw() as *mut _,
+            d3d12::D3D12_QUERY_TYPE_TIMESTAMP,
+            start_index,
+            num_queries,
+            destination_buffer.0.as_raw() as *mut _,
+            aligned_destination_buffer_offset,
+        );
     }
 }
 

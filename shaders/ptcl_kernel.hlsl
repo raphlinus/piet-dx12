@@ -6,7 +6,7 @@ cbuffer Constants : register(b0)
     uint num_tiles_y;
 };
 
-ByteAddressBuffer circle_bbox_buffer : register(t0);
+ByteAddressBuffer object_data : register(t0);
 ByteAddressBuffer circle_color_buffer : register(t1);
 
 RWByteAddressBuffer per_tile_command_list: register(u0);

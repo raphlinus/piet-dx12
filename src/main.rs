@@ -5,6 +5,7 @@
 // #![windows_subsystem = "windows"] (I think I want the console)
 pub mod dx12;
 pub mod error;
+pub mod glyphs;
 pub mod gpu;
 pub mod scene;
 pub mod window;
@@ -18,12 +19,10 @@ pub fn win32_string(value: &str) -> Vec<u16> {
         .collect()
 }
 
-
 fn main() {
     unsafe {
         println!("creating window...");
-        let mut wnd =
-            window::Window::new(win32_string("test"), win32_string("test"));
+        let mut wnd = window::Window::new(win32_string("test"), win32_string("test"));
 
         let num_renders: u32 = 1000;
         let mut gpu_state = gpu::GpuState::new(

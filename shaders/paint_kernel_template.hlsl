@@ -1,14 +1,15 @@
 cbuffer Constants : register(b0)
 {
 	uint num_objects;
+	uint object_size;
 	uint tile_size;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
+
 ByteAddressBuffer object_data_buffer : register(t0);
-ByteAddressBuffer object_color_buffer : register(t1);
-Texture2D<float4> glyphs[10] : register(t2);
+Texture2D<float> glyphs[10] : register(t1);
 SamplerState glyphs_sampler : register(s0);
 
 RWByteAddressBuffer per_tile_command_list: register(u0);
@@ -29,9 +30,10 @@ float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, f
     return pixel_color;
 }
 
-float4 calculate_pixel_color_due_to_glyph(uint2 pixel_pos, uint glyph_address, uint4 glyph_bbox, float4 color) {
-    float4 gather_result = glyphs[NonUniformResourceIndex(glyph_address)].GatherAlpha(sampler, pixel_pos).w;
-    float glyph_alpha = gather_result.a;
+float4 calculate_pixel_color_due_to_glyph(uint2 pixel_pos, uint glyph_index, uint4 glyph_bbox, float4 color) {
+    uint2 glyph_pixel_pos = {pixel_pos.x - glyph_bbox[0], pixel_pos.y - glyph_bbox[2]};
+    float glyph_alpha = glyphs[NonUniformResourceIndex(glyph_index)][glyph_pixel_pos];
+
     float4 pixel_color = {0.0, 0.0, 0.0, 0.0};
 
     if (glyph_alpha > 0.0) {
@@ -266,7 +268,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             uint packed_object_specific_data = packed_command.x;
             uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
             uint object_type = object_specific_data.x;
-            uint glyph_address = object_specific_data.y;
+            uint glyph_index = object_specific_data.y;
             float4 color = unpack_color(packed_command.w);
 
             float4 fg = {0.0, 0.0, 0.0, 0.0};
@@ -274,7 +276,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
                 float4 fg = calculate_pixel_color_due_to_circle(pixel_pos, bbox, color);
 
             } else {
-                float4 fg = calculate_pixel_color_due_to_glyph(pixel_pos, glyph_address, bbox, color);
+                float4 fg = calculate_pixel_color_due_to_glyph(pixel_pos, glyph_index, bbox, color);
             }
 
             bg = blend_pd_over(bg, fg);

@@ -1,6 +1,7 @@
 extern crate winapi;
 
 use crate::dx12;
+use crate::glyphs::load_raw_glyphs;
 use crate::scene;
 use crate::window;
 use std::path::{Path, PathBuf};
@@ -54,27 +55,37 @@ impl Quad {
 
 const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
-fn materialize_per_tile_command_list_kernel_code(ptcl_num_tiles_per_tg_x: u32, ptcl_num_tiles_per_tg_y: u32, shader_template_path: &Path, shader_path: &Path) {
+fn materialize_per_tile_command_list_kernel_code(
+    ptcl_num_tiles_per_tg_x: u32,
+    ptcl_num_tiles_per_tg_y: u32,
+    shader_template_path: &Path,
+    shader_path: &Path,
+) {
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not read data from provided shader template path");
 
     let step1 = step0.replace("~PTCL_X~", &format!("{}", ptcl_num_tiles_per_tg_x));
     let step2 = step1.replace("~PTCL_Y~", &format!("{}", ptcl_num_tiles_per_tg_y));
-    
+
     std::fs::write(shader_path, step2).expect("shader template could not be materialized");
 }
 
-fn materialize_paint_kernel_code(paint_num_pixels_per_tg_x: u32, paint_num_pixels_per_tg_y: u32, shader_template_path: &Path, shader_path: &Path) {
+fn materialize_paint_kernel_code(
+    paint_num_pixels_per_tg_x: u32,
+    paint_num_pixels_per_tg_y: u32,
+    shader_template_path: &Path,
+    shader_path: &Path,
+) {
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not read data from provided shader template path");
-    
+
     let step1 = step0.replace("~P_X~", &format!("{}", paint_num_pixels_per_tg_x));
     let step2 = step1.replace("~P_Y~", &format!("{}", paint_num_pixels_per_tg_y));
 
     std::fs::write(shader_path, step2).expect("shader template could not be materialized");
 }
 
-enum TimePoints {
+enum TimingQueryPoints {
     BeginCmd,
     PtclInitComplete,
     PtclDispatch,
@@ -101,10 +112,17 @@ struct TimingData {
     end_cmd_ts: Vec<f64>,
 }
 
-fn interpret_timing_data_in_ms(num_renders: usize, tick_period_in_seconds: f64, raw_timing_data: Vec<u64>) -> TimingData {
+fn interpret_timing_data_in_ms(
+    num_renders: usize,
+    tick_period_in_seconds: f64,
+    raw_timing_data: Vec<u64>,
+) -> TimingData {
     let tick0 = raw_timing_data[0];
-    let tick_period_in_ms = tick_period_in_seconds*1000.0;
-    let timing_data_in_ms = raw_timing_data.iter().map(|ticks| (*ticks as f64)*tick_period_in_ms).collect::<Vec<f64>>();
+    let tick_period_in_ms = tick_period_in_seconds * 1000.0;
+    let timing_data_in_ms = raw_timing_data
+        .iter()
+        .map(|ticks| (*ticks as f64) * tick_period_in_ms)
+        .collect::<Vec<f64>>();
 
     let mut begin_cmd_tps = Vec::<f64>::new();
     let mut ptcl_init_complete_ts = Vec::<f64>::new();
@@ -112,24 +130,24 @@ fn interpret_timing_data_in_ms(num_renders: usize, tick_period_in_seconds: f64, 
     let mut ptcl_buf_sync_ts = Vec::<f64>::new();
     let mut paint_init_complete_ts = Vec::<f64>::new();
     let mut paint_dispatch_ts = Vec::<f64>::new();
-    let mut canvas_buf_sync_ts= Vec::<f64>::new();
-    let mut draw_init_complete_ts= Vec::<f64>::new();
-    let mut draw_ts= Vec::<f64>::new();
+    let mut canvas_buf_sync_ts = Vec::<f64>::new();
+    let mut draw_init_complete_ts = Vec::<f64>::new();
+    let mut draw_ts = Vec::<f64>::new();
     let mut end_cmd_ts = Vec::<f64>::new();
 
-    let tp_count = TimePoints::Count as usize;
-    let ptcl_init_complete_offset = TimePoints::PtclInitComplete as usize;
-    let ptcl_dispatch_offset = TimePoints::PtclDispatch as usize;
-    let ptcl_buf_sync_offset = TimePoints::PtclBufferSync as usize;
-    let paint_init_complete_offset = TimePoints::PaintInitComplete as usize;
-    let paint_dispatch_offset = TimePoints::PaintDispatch as usize;
-    let canvas_buf_sync_offset = TimePoints::CanvasBufferSync as usize;
-    let draw_init_complete_offset = TimePoints::DrawInitComplete as usize;
-    let draw_offset = TimePoints::Draw as usize;
-    let end_cmd_offset = TimePoints::EndCmd as usize;
+    let tp_count = TimingQueryPoints::Count as usize;
+    let ptcl_init_complete_offset = TimingQueryPoints::PtclInitComplete as usize;
+    let ptcl_dispatch_offset = TimingQueryPoints::PtclDispatch as usize;
+    let ptcl_buf_sync_offset = TimingQueryPoints::PtclBufferSync as usize;
+    let paint_init_complete_offset = TimingQueryPoints::PaintInitComplete as usize;
+    let paint_dispatch_offset = TimingQueryPoints::PaintDispatch as usize;
+    let canvas_buf_sync_offset = TimingQueryPoints::CanvasBufferSync as usize;
+    let draw_init_complete_offset = TimingQueryPoints::DrawInitComplete as usize;
+    let draw_offset = TimingQueryPoints::Draw as usize;
+    let end_cmd_offset = TimingQueryPoints::EndCmd as usize;
 
     for i in 0..num_renders {
-        let ix = i*tp_count;
+        let ix = i * tp_count;
 
         let (
             begin_cmd_tp,
@@ -141,17 +159,18 @@ fn interpret_timing_data_in_ms(num_renders: usize, tick_period_in_seconds: f64, 
             canvas_buf_sync_tp,
             draw_init_complete_tp,
             draw_tp,
-            end_cmd_tp
-        ) = (timing_data_in_ms[ix],
-             timing_data_in_ms[ix + ptcl_init_complete_offset],
-             timing_data_in_ms[ix + ptcl_dispatch_offset],
-             timing_data_in_ms[ix + ptcl_buf_sync_offset],
-             timing_data_in_ms[ix + paint_init_complete_offset],
-             timing_data_in_ms[ix + paint_dispatch_offset],
-             timing_data_in_ms[ix + canvas_buf_sync_offset],
-             timing_data_in_ms[ix + draw_init_complete_offset],
-             timing_data_in_ms[ix + draw_offset],
-             timing_data_in_ms[ix + end_cmd_offset],
+            end_cmd_tp,
+        ) = (
+            timing_data_in_ms[ix],
+            timing_data_in_ms[ix + ptcl_init_complete_offset],
+            timing_data_in_ms[ix + ptcl_dispatch_offset],
+            timing_data_in_ms[ix + ptcl_buf_sync_offset],
+            timing_data_in_ms[ix + paint_init_complete_offset],
+            timing_data_in_ms[ix + paint_dispatch_offset],
+            timing_data_in_ms[ix + canvas_buf_sync_offset],
+            timing_data_in_ms[ix + draw_init_complete_offset],
+            timing_data_in_ms[ix + draw_offset],
+            timing_data_in_ms[ix + end_cmd_offset],
         );
 
         begin_cmd_tps.push(begin_cmd_tp);
@@ -188,7 +207,7 @@ fn average_f64s(count: usize, input_data: &[f64]) -> f64 {
         sum += input_data[i];
     }
 
-    return sum/num_elements;
+    return sum / num_elements;
 }
 
 pub struct GpuState {
@@ -219,8 +238,8 @@ pub struct GpuState {
     compute_descriptor_heap: dx12::DescriptorHeap,
     constants_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
-    circle_color_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
+    glyph_textures: Vec<d12::Resource>,
     canvas_texture: dx12::Resource,
     per_tile_command_lists_root_signature: dx12::RootSignature,
     paint_root_signature: dx12::RootSignature,
@@ -252,18 +271,22 @@ impl GpuState {
         paint_num_tiles_per_tg_y: u32,
         num_renders: u32,
     ) -> GpuState {
+        let raw_glyphs = crate::glyphs::load_raw_glyphs();
         let width = wnd.get_width();
         let height = wnd.get_height();
         let num_objects = 1000;
-        let (bbox_data, color_data) = scene::create_random_scene(width, height, num_objects);
-//        let num_objects = 1;
-//        let (bbox_data, color_data) = scene::create_constant_scene();
+        let (object_size, object_data) =
+            scene::create_random_scene(width, height, num_objects, &raw_glyphs);
+        //        let num_objects = 1;
+        //        let (bbox_data, color_data) = scene::create_constant_scene();
 
         let f_tile_side_length_in_pixels = tile_side_length_in_pixels as f32;
         let f_width = width as f32;
         let f_height = height as f32;
-        let canvas_quad_width = (f_width / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
-        let canvas_quad_height = (f_height / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
+        let canvas_quad_width =
+            (f_width / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
+        let canvas_quad_height =
+            (f_height / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
         let num_tiles_x = {
             let min_ntx = (canvas_quad_width / f_tile_side_length_in_pixels) as u32;
             let remainder = min_ntx % per_tile_command_lists_num_tiles_per_tg_x;
@@ -288,8 +311,8 @@ impl GpuState {
         let canvas_quad_height = (num_tiles_y * tile_side_length_in_pixels) as f32;
         let num_ptcl_tg_x = num_tiles_x / per_tile_command_lists_num_tiles_per_tg_x;
         let num_ptcl_tg_y = num_tiles_y / per_tile_command_lists_num_tiles_per_tg_y;
-        let paint_num_pixels_per_tg_x = paint_num_tiles_per_tg_x*tile_side_length_in_pixels;
-        let paint_num_pixels_per_tg_y = paint_num_tiles_per_tg_y*tile_side_length_in_pixels;
+        let paint_num_pixels_per_tg_x = paint_num_tiles_per_tg_x * tile_side_length_in_pixels;
+        let paint_num_pixels_per_tg_y = paint_num_tiles_per_tg_y * tile_side_length_in_pixels;
 
         let canvas_quad = Quad::new(
             -1.0 * (canvas_quad_width / 2.0),
@@ -303,13 +326,14 @@ impl GpuState {
         let ptcl_kernel_template_path = shader_folder.join(Path::new("ptcl_kernel_template.hlsl"));
         let ptcl_kernel_path = shader_folder.join(Path::new("ptcl_kernel.hlsl"));
         materialize_per_tile_command_list_kernel_code(
-            per_tile_command_lists_num_tiles_per_tg_x, 
+            per_tile_command_lists_num_tiles_per_tg_x,
             per_tile_command_lists_num_tiles_per_tg_y,
             &ptcl_kernel_template_path,
             &ptcl_kernel_path,
         );
 
-        let paint_kernel_template_path = shader_folder.join(Path::new("paint_kernel_template.hlsl"));
+        let paint_kernel_template_path =
+            shader_folder.join(Path::new("paint_kernel_template.hlsl"));
         let paint_kernel_path = shader_folder.join(Path::new("paint_kernel.hlsl"));
         materialize_paint_kernel_code(
             paint_num_pixels_per_tg_x,
@@ -324,14 +348,20 @@ impl GpuState {
         println!("width: {}", width);
         println!("height: {}", height);
         println!("tile_side_length_in_pixels: {}", tile_side_length_in_pixels);
-        println!("per_tile_command_lists_num_tiles_per_tg_x: {}", per_tile_command_lists_num_tiles_per_tg_x);
-        println!("per_tile_command_lists_num_tiles_per_tg_y: {}", per_tile_command_lists_num_tiles_per_tg_y);
+        println!(
+            "per_tile_command_lists_num_tiles_per_tg_x: {}",
+            per_tile_command_lists_num_tiles_per_tg_x
+        );
+        println!(
+            "per_tile_command_lists_num_tiles_per_tg_y: {}",
+            per_tile_command_lists_num_tiles_per_tg_y
+        );
         println!("num_tiles_x: {}", num_tiles_x);
         println!("num_tiles_y: {}", num_tiles_y);
         println!("canvas_quad_width: {}", canvas_quad_width);
         println!("canvas_quad_height: {}", canvas_quad_height);
-        println!("slop_x: {}", (canvas_quad_width/(width as f32)) - 1.0 );
-        println!("slop_y: {}", (canvas_quad_height/(height as f32)) - 1.0 );
+        println!("slop_x: {}", (canvas_quad_width / (width as f32)) - 1.0);
+        println!("slop_y: {}", (canvas_quad_height / (height as f32)) - 1.0);
         println!("num_ptcl_tg_x: {}", num_ptcl_tg_x);
         println!("num_ptcl_tg_x: {}", num_ptcl_tg_y);
         //panic!("stop");
@@ -372,19 +402,20 @@ impl GpuState {
             compute_descriptor_heap,
             constants_buffer,
             object_data_buffer,
-            circle_color_buffer,
             per_tile_command_lists_buffer,
+            glyph_textures,
             canvas_texture,
         ) = GpuState::create_compute_pipeline_dependencies(
             device.clone(),
             width,
             height,
             num_objects,
+            object_size,
             num_tiles_x,
             num_tiles_y,
             tile_side_length_in_pixels,
-            bbox_data,
-            color_data,
+            object_data,
+            raw_glyphs,
         );
 
         let (
@@ -411,7 +442,10 @@ impl GpuState {
             canvas_quad,
         );
 
-        let query_heap = device.create_query_heap(d3d12::D3D12_QUERY_HEAP_TYPE_TIMESTAMP, num_renders*(TimePoints::Count as u32));
+        let query_heap = device.create_query_heap(
+            d3d12::D3D12_QUERY_HEAP_TYPE_TIMESTAMP,
+            num_renders * (TimingQueryPoints::Count as u32),
+        );
         let timing_query_buffer = GpuState::create_timing_query_buffer(device.clone(), num_renders);
 
         let mut gpu_state = GpuState {
@@ -442,8 +476,8 @@ impl GpuState {
             compute_descriptor_heap,
             constants_buffer,
             object_data_buffer,
-            circle_color_buffer,
             per_tile_command_lists_buffer,
+            glyph_textures,
             canvas_texture,
             per_tile_command_lists_root_signature,
             paint_root_signature,
@@ -468,7 +502,7 @@ impl GpuState {
     }
 
     unsafe fn populate_command_list(&mut self, render_index: u32) {
-        let offset = render_index*(TimePoints::Count as u32);
+        let offset = render_index * (TimingQueryPoints::Count as u32);
 
         self.command_allocators[self.frame_index].reset();
 
@@ -478,8 +512,10 @@ impl GpuState {
             self.per_tile_command_lists_pipeline_state.clone(),
         );
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::BeginCmd as u32  + offset);
-
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::BeginCmd as u32 + offset,
+        );
 
         self.command_list
             .set_compute_root_signature(self.per_tile_command_lists_root_signature.clone());
@@ -491,15 +527,20 @@ impl GpuState {
                 .get_gpu_descriptor_handle_at_offset(0),
         );
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PtclInitComplete as u32  + offset);
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::PtclInitComplete as u32 + offset,
+        );
 
         //panic!("stop");
 
         self.command_list
             .dispatch(self.num_ptcl_tg_x, self.num_ptcl_tg_y, 1);
 
-
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PtclDispatch as u32  + offset);
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::PtclDispatch as u32 + offset,
+        );
 
         // need to ensure all writes to per_tile_command_lists are complete before any reads are done
         let synchronize_wrt_per_tile_command_lists =
@@ -507,8 +548,10 @@ impl GpuState {
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_per_tile_command_lists]);
 
-
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PtclBufferSync as u32  + offset);
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::PtclBufferSync as u32 + offset,
+        );
 
         // paint call
         self.command_list
@@ -523,13 +566,18 @@ impl GpuState {
                 .get_gpu_descriptor_handle_at_offset(0),
         );
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PaintInitComplete as u32  + offset);
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::PaintInitComplete as u32 + offset,
+        );
 
         self.command_list
             .dispatch(self.num_tiles_x, self.num_tiles_y, 1);
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::PaintDispatch as u32  + offset);
-
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::PaintDispatch as u32 + offset,
+        );
 
         // need to ensure all writes to intermediate are complete before any reads are done
         let synchronize_wrt_canvas =
@@ -537,9 +585,11 @@ impl GpuState {
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_canvas]);
 
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::CanvasBufferSync as u32 + offset,
+        );
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::CanvasBufferSync as u32  + offset);
-            
         // graphics pipeline call
         self.command_list
             .set_pipeline_state(self.graphics_pipeline_state.clone());
@@ -554,7 +604,7 @@ impl GpuState {
         );
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
-        
+
         let transition_render_target_from_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
@@ -563,8 +613,11 @@ impl GpuState {
         self.command_list
             .set_resource_barrier(vec![transition_render_target_from_present]);
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::DrawInitComplete as u32  + offset);
-        
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::DrawInitComplete as u32 + offset,
+        );
+
         let mut rt_descriptor = self
             .rtv_descriptor_heap
             .get_cpu_descriptor_handle_at_offset(self.frame_index as u32);
@@ -579,8 +632,11 @@ impl GpuState {
             .set_vertex_buffer(0, 1, &self.vertex_buffer_view);
         self.command_list.draw_instanced(4, 1, 0, 0);
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::Draw as u32  + offset);
-        
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::Draw as u32 + offset,
+        );
+
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
             self.render_targets[self.frame_index].0.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -589,20 +645,28 @@ impl GpuState {
         self.command_list
             .set_resource_barrier(vec![transition_render_target_to_present]);
 
-        self.command_list.end_timing_query(self.query_heap.clone(), TimePoints::EndCmd as u32  + offset);
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::EndCmd as u32 + offset,
+        );
 
-        if (render_index == (self.num_renders - 1))
-        {
-            self.command_list.resolve_timing_query_data(self.query_heap.clone(), 0, self.num_renders*(TimePoints::Count as u32), self.timing_query_buffer.clone(), 0);
-//            let transition_timing_query_heap_to_read = dx12::create_transition_resource_barrier(
-//                self.timing_query_buffer.0.as_raw(),
-//                d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
-//                d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
-//            );
-//            self.command_list
-//                .set_resource_barrier(vec![transition_timing_query_heap_to_read]);
+        if (render_index == (self.num_renders - 1)) {
+            self.command_list.resolve_timing_query_data(
+                self.query_heap.clone(),
+                0,
+                self.num_renders * (TimingQueryPoints::Count as u32),
+                self.timing_query_buffer.clone(),
+                0,
+            );
+            //            let transition_timing_query_heap_to_read = dx12::create_transition_resource_barrier(
+            //                self.timing_query_buffer.0.as_raw(),
+            //                d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
+            //                d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            //            );
+            //            self.command_list
+            //                .set_resource_barrier(vec![transition_timing_query_heap_to_read]);
         }
-        
+
         self.command_list.close();
     }
 
@@ -773,35 +837,19 @@ impl GpuState {
         (swap_chain3, rtv_descriptor_heap, render_targets)
     }
 
-    unsafe fn create_compute_pipeline_dependencies(
+    unsafe fn create_constants_buffer(
+        constants: &[u32],
         device: dx12::Device,
-        width: u32,
-        height: u32,
-        num_objects: u32,
-        num_tiles_x: u32,
-        num_tiles_y: u32,
-        tile_side_length_in_pixels: u32,
-        bbox_data: Vec<u8>,
-        color_data: Vec<u8>,
-    ) -> (
-        dx12::DescriptorHeap,
-        dx12::Resource,
-        dx12::Resource,
-        dx12::Resource,
-        dx12::Resource,
-        dx12::Resource,
-    ) {
-        // create compute resource descriptor heap
-        let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
-            Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: 5,
-            Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
-            NodeMask: 0,
-        };
-        let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
-
-        // create constants buffer
-        let constants = [num_objects, tile_side_length_in_pixels, num_tiles_x, num_tiles_y];
+        descriptor_heap: dx12::DescriptorHeap,
+        descriptor_index: u32,
+    ) -> dx12::Resource {
+        let constants = [
+            num_objects,
+            object_size,
+            tile_side_length_in_pixels,
+            num_tiles_x,
+            num_tiles_y,
+        ];
         let constant_buffer_stride = mem::size_of::<u32>();
         let constant_buffer_size = constant_buffer_stride * constants.len();
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -841,13 +889,22 @@ impl GpuState {
         constants_buffer.upload_data_to_resource(256, constants.as_ptr());
         device.create_constant_buffer_view(
             constants_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(0),
+            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
             padded_size_in_bytes as u32,
         );
 
-        // create circle bbox buffer
-        let object_data_buffer_size_in_bytes = bbox_data.len();
-        let object_data_buffer_size_in_u32s = (object_data_buffer_size_in_bytes/mem::size_of::<u32>()) as u32;
+        constants_buffer
+    }
+
+    unsafe fn create_object_data_buffer(
+        object_data: Vec<u8>,
+        device: dx12::Device,
+        descriptor_heap: dx12::DescriptorHeap,
+        descriptor_index: u32,
+    ) -> dx12::Resource {
+        let object_data_buffer_size_in_bytes = object_data.len();
+        let object_data_buffer_size_in_u32s =
+            (object_data_buffer_size_in_bytes / mem::size_of::<u32>()) as u32;
         let object_data_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -889,67 +946,22 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        object_data_buffer.upload_data_to_resource(bbox_data.len(), bbox_data.as_ptr());
+        object_data_buffer.upload_data_to_resource(object_data.len(), object_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             object_data_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(1),
+            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
             0,
             object_data_buffer_size_in_u32s,
         );
 
-        // create circle color buffer
-        let circle_color_buffer_size_in_bytes = color_data.len();
-        let circle_color_buffer_size_in_u32s = (circle_color_buffer_size_in_bytes/mem::size_of::<u32>()) as u32;
-        let circle_color_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let circle_color_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: circle_color_buffer_size_in_bytes as u64,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
-            ..mem::zeroed()
-        };
-        let circle_color_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let circle_color_buffer = device.create_committed_resource(
-            &circle_color_buffer_heap_properties,
-            //TODO: is this heap flag ok?
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &circle_color_buffer_resource_description,
-            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
-            ptr::null(),
-        );
-        circle_color_buffer.upload_data_to_resource(color_data.len(), color_data.as_ptr());
-        device.create_byte_addressed_buffer_shader_resource_view(
-            circle_color_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(2),
-            0,
-            circle_color_buffer_size_in_u32s,
-        );
+        object_data_buffer
+    }
 
-        // create per tile command list resource
+    unsafe fn create_per_tile_command_lists_buffer(
+        device: dx12::Device,
+        descriptor_heap: dx12::DescriptorHeap,
+        descriptor_index: u32,
+    ) -> dx12::Resource {
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
         let per_tile_command_list_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
@@ -962,7 +974,8 @@ impl GpuState {
             VisibleNodeMask: 0,
         };
         let per_tile_command_list_buffer_size_in_u32s = num_objects * num_tiles_x * num_tiles_y;
-        let per_tile_command_list_buffer_size = (mem::size_of::<u32>() as u64) * (per_tile_command_list_buffer_size_in_u32s as u64);
+        let per_tile_command_list_buffer_size =
+            (mem::size_of::<u32>() as u64) * (per_tile_command_list_buffer_size_in_u32s as u64);
         assert!(
             per_tile_command_list_buffer_size < (std::u32::MAX as u64),
             "per_tile_command_list_buffer_size >= std::u32::MAX!"
@@ -993,12 +1006,67 @@ impl GpuState {
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
         device.create_byte_addressed_buffer_unordered_access_view(
             per_tile_command_lists.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(3),
+            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
             0,
             per_tile_command_list_buffer_size_in_u32s,
         );
 
-        // create intermediate target resource
+        per_tile_command_lists
+    }
+
+    unsafe fn create_glyph_texture(
+        raw_glyph: crate::glyphs::RawGlyph,
+        device: dx12::Device,
+        descriptor_heap: dx12::DescriptorHeap,
+        descriptor_index: u32,
+    ) -> dx12::Resource {
+        let glyph_size_in_bytes = raw_glyph.bytes.len();
+        let glyph_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let glyph_resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            Width: raw_glyph.width as u64,
+            Height: raw_glyph.height as u32,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            ..mem::zeroed()
+        };
+        let glyph_texture = device.create_committed_resource(
+            &object_data_buffer_heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &object_data_buffer_resource_description,
+            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            ptr::null(),
+        );
+        glyph_texture.upload_data_to_resource(raw_glyph.bytes.len(), raw_glyph.bytes.as_ptr());
+        device.create_texture2D_shader_resource_view(
+            glyph_texture.clone(),
+            dxgiformat::DXGI_FORMAT_R8_UNORM,
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+        );
+
+        glyph_texture
+    }
+
+    unsafe fn create_canvas_texture(
+        device: dx12::Device,
+        descriptor_heap: dx12::DescriptorHeap,
+        descriptor_index: u32,
+    ) -> dx12::Resource {
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
         let canvas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             //for GPU access only
@@ -1014,8 +1082,8 @@ impl GpuState {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
             //TODO: what alignment should be chosen?
             Alignment: 0,
-            Width: (num_tiles_x*tile_side_length_in_pixels) as u64,
-            Height: num_tiles_y*tile_side_length_in_pixels,
+            Width: (num_tiles_x * tile_side_length_in_pixels) as u64,
+            Height: num_tiles_y * tile_side_length_in_pixels,
             DepthOrArraySize: 1,
             //TODO: what should MipLevels be?
             MipLevels: 1,
@@ -1030,7 +1098,7 @@ impl GpuState {
         };
         let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
-        let mut canvas = device.create_committed_resource(
+        let mut canvas_texture = device.create_committed_resource(
             &canvas_heap_properties,
             d3d12::D3D12_HEAP_FLAG_NONE,
             &canvas_resource_desc,
@@ -1038,17 +1106,105 @@ impl GpuState {
             ptr::null(),
         );
         device.create_unordered_access_view(
-            canvas.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(4),
+            canvas_texture.clone(),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
         );
+
+        canvas_texture
+    }
+
+    unsafe fn create_compute_pipeline_dependencies(
+        device: dx12::Device,
+        width: u32,
+        height: u32,
+        num_objects: u32,
+        object_size: u32,
+        num_tiles_x: u32,
+        num_tiles_y: u32,
+        tile_side_length_in_pixels: u32,
+        object_data: Vec<u8>,
+        raw_glyphs: Vec<crate::glyphs::RawGlyph>,
+    ) -> (
+        dx12::DescriptorHeap,
+        dx12::Resource,
+        dx12::Resource,
+        dx12::Resource,
+        Vec<dx12::Resource>,
+        dx12::Resource,
+    ) {
+        // create compute resource descriptor heap
+        let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            NumDescriptors: 4 + (raw_glyphs.len() as u32),
+            Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+            NodeMask: 0,
+        };
+        let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
+        let mut descriptor_index: u32 = 0;
+
+        // create constants buffer
+        let constants_buffer = {
+            let constants = [
+                num_objects,
+                object_size,
+                tile_side_length_in_pixels,
+                num_tiles_x,
+                num_tiles_y,
+            ];
+            GpuState::create_constants_buffer(
+                &constants,
+                device.clone(),
+                compute_descriptor_heap.clone(),
+                descriptor_index,
+            )
+        };
+        descriptor_index += 1;
+
+        // create object data buffer
+        let object_data_buffer = GpuState::create_object_data_buffer(
+            object_data,
+            device.clone(),
+            compute_descriptor_heap.clone(),
+            descriptor_index,
+        );
+        descriptor_index += 1;
+
+        // create per tile command list resource
+        let ptcl_buffer = GpuState::create_per_tile_command_lists_buffer(
+            device.clone(),
+            compute_descriptor_heap.clone(),
+            descriptor_index,
+        );
+        descriptor_index += 1;
+
+        // create intermediate target resource
+        let canvas_texture = GpuState::create_canvas_texture(
+            device.clone(),
+            compute_descriptor_heap.clone(),
+            descriptor_index,
+        );
+        descriptor_index += 1;
+
+        // create glyph textures
+        let mut glyph_textures = Vec::<dx12::Resource>::new();
+        for raw_glyph in raw_glyphs.into_iter() {
+            let glyph_texture = GpuState::create_glyph_texture(
+                raw_glyph,
+                device.clone(),
+                compute_descriptor_heap.clone(),
+                descriptor_index,
+            );
+            glyph_textures.push(glyph_texture);
+            descriptor_index += 1;
+        }
 
         (
             compute_descriptor_heap,
             constants_buffer,
             object_data_buffer,
-            circle_color_buffer,
-            per_tile_command_lists,
-            canvas,
+            ptcl_buffer,
+            glyph_textures,
+            canvas_texture,
         )
     }
 
@@ -1493,8 +1649,12 @@ impl GpuState {
         )
     }
 
-    unsafe fn create_timing_query_buffer(device: dx12::Device, num_expected_results: u32) -> dx12::Resource {
-        let size_in_bytes = mem::size_of::<u64>()*((num_expected_results*(TimePoints::Count as u32)) as usize);
+    unsafe fn create_timing_query_buffer(
+        device: dx12::Device,
+        num_expected_results: u32,
+    ) -> dx12::Resource {
+        let size_in_bytes = mem::size_of::<u64>()
+            * ((num_expected_results * (TimingQueryPoints::Count as u32)) as usize);
         let timing_query_buffer_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
             Width: size_in_bytes as u64,
@@ -1529,24 +1689,52 @@ impl GpuState {
             ptr::null(),
         );
 
-        device.create_committed_resource(&timing_query_buffer_heap_properties, d3d12::D3D12_HEAP_FLAG_NONE, &timing_query_buffer_description, d3d12::D3D12_RESOURCE_STATE_COPY_DEST, ptr::null())
+        device.create_committed_resource(
+            &timing_query_buffer_heap_properties,
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &timing_query_buffer_description,
+            d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
+            ptr::null(),
+        )
     }
 
     pub unsafe fn print_stats(&mut self) {
         self.wait_for_gpu();
 
-        let raw_timing_data: Vec<u64> = self.timing_query_buffer.download_data_from_resource::<u64>((self.num_renders * TimePoints::Count as u32) as usize);
-        let tick_period_in_seconds = 1.0/(self.command_queue.get_timestamp_frequency() as f64);
+        let raw_timing_data: Vec<u64> =
+            self.timing_query_buffer.download_data_from_resource::<u64>(
+                (self.num_renders * TimingQueryPoints::Count as u32) as usize,
+            );
+        let tick_period_in_seconds = 1.0 / (self.command_queue.get_timestamp_frequency() as f64);
 
-        let num_timepoints = (TimePoints::Count as u32) as f64;
-        let num_recorded_renders = (raw_timing_data.len() as f64)/num_timepoints;
+        let num_timepoints = (TimingQueryPoints::Count as u32) as f64;
+        let num_recorded_renders = (raw_timing_data.len() as f64) / num_timepoints;
         //assert_eq!(self.num_renders, num_recorded_renders);
         println!("num_recorded_renders: {}", num_recorded_renders);
 
         println!("num recorded renders: {}", num_recorded_renders);
-        let timing_data = interpret_timing_data_in_ms(self.num_renders as usize, tick_period_in_seconds, raw_timing_data);
-        println!("average ptcl dispatch time (ms): {}", average_f64s(timing_data.ptcl_dispatch_ts.len(), &timing_data.ptcl_dispatch_ts));
-        println!("average paint dispatch time (ms): {}", average_f64s(timing_data.paint_dispatch_ts.len(), &timing_data.paint_dispatch_ts));
-        println!("average draw time (ms): {}", average_f64s(timing_data.draw_ts.len(), &timing_data.draw_ts));
+        let timing_data = interpret_timing_data_in_ms(
+            self.num_renders as usize,
+            tick_period_in_seconds,
+            raw_timing_data,
+        );
+        println!(
+            "average ptcl dispatch time (ms): {}",
+            average_f64s(
+                timing_data.ptcl_dispatch_ts.len(),
+                &timing_data.ptcl_dispatch_ts
+            )
+        );
+        println!(
+            "average paint dispatch time (ms): {}",
+            average_f64s(
+                timing_data.paint_dispatch_ts.len(),
+                &timing_data.paint_dispatch_ts
+            )
+        );
+        println!(
+            "average draw time (ms): {}",
+            average_f64s(timing_data.draw_ts.len(), &timing_data.draw_ts)
+        );
     }
 }
