@@ -26,14 +26,15 @@ pub unsafe fn create_random_scene(
             (diameter, diameter, 0)
         } else {
             let digit: u16 = rng.gen_range(0, 10);
-            (raw_glyphs[digit].width, raw_glyphs[digit].height, digit)
+            let relevant_raw_glyph = &raw_glyphs[digit as usize];
+            (relevant_raw_glyph.width, relevant_raw_glyph.height, digit)
         };
 
         let bbox_min_x = rng.gen_range(0, screen_width as u16);
         let bbox_min_y = rng.gen_range(0, screen_height as u16);
 
         object_data
-            .write_u16::<LittleEndian>(digit)
+            .write_u16::<LittleEndian>(additional_data)
             .expect("could not convert u32 to bytes");
         object_data
             .write_u16::<LittleEndian>(object_type)

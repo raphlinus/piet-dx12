@@ -227,7 +227,7 @@ pub struct GpuState {
     vertex_buffer_view: d3d12::D3D12_VERTEX_BUFFER_VIEW,
     rtv_descriptor_heap: dx12::DescriptorHeap,
     render_targets: Vec<dx12::Resource>,
-    graphics_root_signature: dx12::RootSignature,
+    graphics_pipeline_root_signature: dx12::RootSignature,
     graphics_pipeline_state: dx12::PipelineState,
 
     num_tiles_x: u32,
@@ -239,10 +239,10 @@ pub struct GpuState {
     constants_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
-    glyph_textures: Vec<d12::Resource>,
+    glyph_textures: Vec<dx12::Resource>,
     canvas_texture: dx12::Resource,
-    per_tile_command_lists_root_signature: dx12::RootSignature,
-    paint_root_signature: dx12::RootSignature,
+    per_tile_command_lists_pipeline_root_signature: dx12::RootSignature,
+    paint_pipeline_root_signature: dx12::RootSignature,
     per_tile_command_lists_pipeline_state: dx12::PipelineState,
     paint_pipeline_state: dx12::PipelineState,
 
@@ -388,7 +388,7 @@ impl GpuState {
         let (factory4, device, command_allocators, command_queue, fence, fence_event) =
             GpuState::create_shared_pipeline_dependencies();
 
-        let (swapchain, rtv_descriptor_heap, render_targets) =
+        let (swapchain, rtv_descriptor_heap, render_targets, graphics_pipeline_root_signature) =
             GpuState::create_graphics_pipeline_dependencies(
                 device.clone(),
                 width,
@@ -405,6 +405,8 @@ impl GpuState {
             per_tile_command_lists_buffer,
             glyph_textures,
             canvas_texture,
+            per_tile_command_lists_pipeline_root_signature,
+            paint_pipeline_root_signature,
         ) = GpuState::create_compute_pipeline_dependencies(
             device.clone(),
             width,
@@ -419,11 +421,8 @@ impl GpuState {
         );
 
         let (
-            per_tile_command_lists_root_signature,
             per_tile_command_lists_pipeline_state,
-            paint_root_signature,
             paint_pipeline_state,
-            graphics_root_signature,
             graphics_pipeline_state,
             vertex_buffer,
             vertex_buffer_view,
@@ -435,9 +434,12 @@ impl GpuState {
             &vertex_shader_path,
             &fragment_shader_path,
             per_tile_command_lists_entry,
+            per_tile_command_lists_pipeline_root_signature.clone(),
+            paint_pipeline_root_signature.clone(),
             paint_entry,
             vertex_entry,
             fragment_entry,
+            graphics_pipeline_root_signature.clone(),
             &command_allocators,
             canvas_quad,
         );
@@ -465,7 +467,7 @@ impl GpuState {
             vertex_buffer_view,
             rtv_descriptor_heap,
             render_targets,
-            graphics_root_signature,
+            graphics_pipeline_root_signature,
             graphics_pipeline_state,
 
             num_tiles_x,
@@ -479,8 +481,8 @@ impl GpuState {
             per_tile_command_lists_buffer,
             glyph_textures,
             canvas_texture,
-            per_tile_command_lists_root_signature,
-            paint_root_signature,
+            per_tile_command_lists_pipeline_root_signature,
+            paint_pipeline_root_signature,
             per_tile_command_lists_pipeline_state,
             paint_pipeline_state,
 
@@ -518,7 +520,7 @@ impl GpuState {
         );
 
         self.command_list
-            .set_compute_root_signature(self.per_tile_command_lists_root_signature.clone());
+            .set_compute_pipeline_root_signature(self.per_tile_command_lists_pipeline_root_signature.clone());
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_compute_root_descriptor_table(
@@ -557,7 +559,7 @@ impl GpuState {
         self.command_list
             .set_pipeline_state(self.paint_pipeline_state.clone());
         self.command_list
-            .set_compute_root_signature(self.paint_root_signature.clone());
+            .set_compute_pipeline_root_signature(self.paint_pipeline_root_signature.clone());
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_compute_root_descriptor_table(
@@ -594,7 +596,7 @@ impl GpuState {
         self.command_list
             .set_pipeline_state(self.graphics_pipeline_state.clone());
         self.command_list
-            .set_graphics_root_signature(self.graphics_root_signature.clone());
+            .set_graphics_pipeline_root_signature(self.graphics_pipeline_root_signature.clone());
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_graphics_root_descriptor_table(
@@ -783,7 +785,12 @@ impl GpuState {
         wnd: &window::Window,
         factory4: dx12::Factory4,
         command_queue: dx12::CommandQueue,
-    ) -> (dx12::SwapChain3, dx12::DescriptorHeap, Vec<dx12::Resource>) {
+    ) -> (
+        dx12::SwapChain3,
+        dx12::DescriptorHeap,
+        Vec<dx12::Resource>,
+        dx12::RootSignature,
+    ) {
         // create swapchain
         let swapchain_desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
             Width: width,
@@ -834,7 +841,44 @@ impl GpuState {
             render_targets.push(render_target_resource.clone());
         }
 
-        (swap_chain3, rtv_descriptor_heap, render_targets)
+        // create graphics root signature
+        let frag_shader_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: 0,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
+        let frag_shader_srv_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: 1,
+            pDescriptorRanges: &frag_shader_uav_descriptor_range as *const _,
+        };
+        let mut graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_PIXEL,
+            ..mem::zeroed()
+        };
+        *graphics_root_parameter.u.DescriptorTable_mut() = frag_shader_srv_table;
+        let graphics_pipeline_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+            NumParameters: 1,
+            pParameters: &graphics_root_parameter as *const _,
+            NumStaticSamplers: 0,
+            pStaticSamplers: ptr::null(),
+            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
+        };
+        // serialize root signature description and create graphics root signature
+        let blob = dx12::RootSignature::serialize_description(
+            &graphics_pipeline_root_signature_desc,
+            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
+        );
+        let graphics_pipeline_root_signature = device.create_root_signature(0, blob);
+
+        (
+            swap_chain3,
+            rtv_descriptor_heap,
+            render_targets,
+            graphics_pipeline_root_signature,
+        )
     }
 
     unsafe fn create_constants_buffer(
@@ -843,13 +887,6 @@ impl GpuState {
         descriptor_heap: dx12::DescriptorHeap,
         descriptor_index: u32,
     ) -> dx12::Resource {
-        let constants = [
-            num_objects,
-            object_size,
-            tile_side_length_in_pixels,
-            num_tiles_x,
-            num_tiles_y,
-        ];
         let constant_buffer_stride = mem::size_of::<u32>();
         let constant_buffer_size = constant_buffer_stride * constants.len();
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -886,6 +923,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
+        println!("creating constants buffer...");
         constants_buffer.upload_data_to_resource(256, constants.as_ptr());
         device.create_constant_buffer_view(
             constants_buffer.clone(),
@@ -946,6 +984,7 @@ impl GpuState {
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
+        println!("creating object data buffer...");
         object_data_buffer.upload_data_to_resource(object_data.len(), object_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             object_data_buffer.clone(),
@@ -960,6 +999,7 @@ impl GpuState {
     unsafe fn create_per_tile_command_lists_buffer(
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
+        per_tile_command_list_buffer_size_in_u32s: u32,
         descriptor_index: u32,
     ) -> dx12::Resource {
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
@@ -973,7 +1013,6 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let per_tile_command_list_buffer_size_in_u32s = num_objects * num_tiles_x * num_tiles_y;
         let per_tile_command_list_buffer_size =
             (mem::size_of::<u32>() as u64) * (per_tile_command_list_buffer_size_in_u32s as u64);
         assert!(
@@ -1022,7 +1061,7 @@ impl GpuState {
     ) -> dx12::Resource {
         let glyph_size_in_bytes = raw_glyph.bytes.len();
         let glyph_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
             //TODO: what should MemoryPoolPreference flag be?
             MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
@@ -1042,21 +1081,23 @@ impl GpuState {
             },
             Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
             Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            Format: dxgiformat::DXGI_FORMAT_R8_UNORM,
             ..mem::zeroed()
         };
+        println!("creating glyph texture buffer...");
         let glyph_texture = device.create_committed_resource(
-            &object_data_buffer_heap_properties,
+            &glyph_heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &object_data_buffer_resource_description,
+            &glyph_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
         glyph_texture.upload_data_to_resource(raw_glyph.bytes.len(), raw_glyph.bytes.as_ptr());
-        device.create_texture2D_shader_resource_view(
+        device.create_texture2d_shader_resource_view(
             glyph_texture.clone(),
             dxgiformat::DXGI_FORMAT_R8_UNORM,
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
         );
 
         glyph_texture
@@ -1065,6 +1106,8 @@ impl GpuState {
     unsafe fn create_canvas_texture(
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
+        width: u64,
+        height: u32,
         descriptor_index: u32,
     ) -> dx12::Resource {
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
@@ -1082,8 +1125,8 @@ impl GpuState {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
             //TODO: what alignment should be chosen?
             Alignment: 0,
-            Width: (num_tiles_x * tile_side_length_in_pixels) as u64,
-            Height: num_tiles_y * tile_side_length_in_pixels,
+            Width: width,
+            Height: height,
             DepthOrArraySize: 1,
             //TODO: what should MipLevels be?
             MipLevels: 1,
@@ -1098,6 +1141,7 @@ impl GpuState {
         };
         let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
         *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
+        println!("creating canvas texture buffer...");
         let mut canvas_texture = device.create_committed_resource(
             &canvas_heap_properties,
             d3d12::D3D12_HEAP_FLAG_NONE,
@@ -1107,10 +1151,40 @@ impl GpuState {
         );
         device.create_unordered_access_view(
             canvas_texture.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
         );
 
         canvas_texture
+    }
+
+    unsafe fn create_compute_root_signature_from_descriptor_ranges(
+        device: dx12::Device,
+        descriptor_ranges: &[d3d12::D3D12_DESCRIPTOR_RANGE],
+    ) -> dx12::RootSignature {
+        let descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
+            NumDescriptorRanges: descriptor_ranges.len() as u32,
+            pDescriptorRanges: descriptor_ranges.as_ptr() as *const _,
+        };
+        let mut root_parameter = d3d12::D3D12_ROOT_PARAMETER {
+            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
+            ..mem::zeroed()
+        };
+        *root_parameter.u.DescriptorTable_mut() = descriptor_table;
+        let root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+            NumParameters: 1,
+            pParameters: &root_parameter as *const _,
+            NumStaticSamplers: 0,
+            pStaticSamplers: ptr::null(),
+            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
+        };
+        let blob = dx12::RootSignature::serialize_description(
+            &root_signature_desc,
+            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
+        );
+        let root_signature = device.create_root_signature(0, blob);
+
+        root_signature
     }
 
     unsafe fn create_compute_pipeline_dependencies(
@@ -1131,6 +1205,8 @@ impl GpuState {
         dx12::Resource,
         Vec<dx12::Resource>,
         dx12::Resource,
+        dx12::RootSignature,
+        dx12::RootSignature,
     ) {
         // create compute resource descriptor heap
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
@@ -1158,6 +1234,12 @@ impl GpuState {
                 descriptor_index,
             )
         };
+        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: descriptor_index,
+            ..mem::zeroed()
+        };
         descriptor_index += 1;
 
         // create object data buffer
@@ -1167,26 +1249,34 @@ impl GpuState {
             compute_descriptor_heap.clone(),
             descriptor_index,
         );
+        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: descriptor_index,
+            ..mem::zeroed()
+        };
         descriptor_index += 1;
 
         // create per tile command list resource
+        let per_tile_command_list_buffer_size_in_u32s = num_objects * num_tiles_x * num_tiles_y;
         let ptcl_buffer = GpuState::create_per_tile_command_lists_buffer(
             device.clone(),
             compute_descriptor_heap.clone(),
+            per_tile_command_list_buffer_size_in_u32s,
             descriptor_index,
         );
-        descriptor_index += 1;
-
-        // create intermediate target resource
-        let canvas_texture = GpuState::create_canvas_texture(
-            device.clone(),
-            compute_descriptor_heap.clone(),
-            descriptor_index,
-        );
+        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: descriptor_index,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
         descriptor_index += 1;
 
         // create glyph textures
         let mut glyph_textures = Vec::<dx12::Resource>::new();
+        let num_glyph_textures = raw_glyphs.len();
         for raw_glyph in raw_glyphs.into_iter() {
             let glyph_texture = GpuState::create_glyph_texture(
                 raw_glyph,
@@ -1197,7 +1287,55 @@ impl GpuState {
             glyph_textures.push(glyph_texture);
             descriptor_index += 1;
         }
+        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: num_glyph_textures as u32,
+            OffsetInDescriptorsFromTableStart: descriptor_index,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
 
+        // create intermediate target resource
+        let canvas_texture = GpuState::create_canvas_texture(
+            device.clone(),
+            compute_descriptor_heap.clone(),
+            (num_tiles_x * tile_side_length_in_pixels) as u64,
+            num_tiles_y * tile_side_length_in_pixels,
+            descriptor_index,
+        );
+        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: descriptor_index,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
+        descriptor_index += 1;
+
+        let ptcl_pipeline_root_signature = {
+            let per_tile_command_lists_descriptor_ranges = [
+                constants_descriptor_range,
+                objects_descriptor_range,
+                per_tile_command_lists_descriptor_range,
+            ];
+            GpuState::create_compute_root_signature_from_descriptor_ranges(
+                device.clone(),
+                &per_tile_command_lists_descriptor_ranges,
+            )
+        };
+
+        let paint_pipeline_root_signature = {
+            let paint_descriptor_ranges = [
+                constants_descriptor_range,
+                objects_descriptor_range,
+                per_tile_command_lists_descriptor_range,
+                canvas_descriptor_range,
+            ];
+            GpuState::create_compute_root_signature_from_descriptor_ranges(
+                device.clone(),
+                &paint_descriptor_ranges,
+            )
+        };
         (
             compute_descriptor_heap,
             constants_buffer,
@@ -1205,6 +1343,8 @@ impl GpuState {
             ptcl_buffer,
             glyph_textures,
             canvas_texture,
+            ptcl_pipeline_root_signature,
+            paint_pipeline_root_signature,
         )
     }
 
@@ -1214,102 +1354,10 @@ impl GpuState {
         paint_kernel_path: &Path,
         shader_compile_flags: minwindef::DWORD,
         per_tile_command_lists_entry: String,
+        per_tile_command_lists_pipeline_root_signature: dx12::RootSignature,
+        paint_pipeline_root_signature: dx12::RootSignature,
         paint_entry: String,
-    ) -> (
-        dx12::RootSignature,
-        dx12::PipelineState,
-        dx12::RootSignature,
-        dx12::PipelineState,
-    ) {
-        // descriptor_ranges
-        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 0,
-            ..mem::zeroed()
-        };
-        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 2,
-            OffsetInDescriptorsFromTableStart: 1,
-            ..mem::zeroed()
-        };
-        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 3,
-            BaseShaderRegister: 0,
-            ..mem::zeroed()
-        };
-        // intermediate target is in a separate descriptor range from per_tile_command_lists
-        // thus OffsetInDescriptorsFromTableStart should be the same?
-        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 4,
-            BaseShaderRegister: 1,
-            ..mem::zeroed()
-        };
-
-        let per_tile_command_lists_descriptor_ranges = [
-            constants_descriptor_range,
-            objects_descriptor_range,
-            per_tile_command_lists_descriptor_range,
-        ];
-        let per_tile_command_lists_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
-            NumDescriptorRanges: per_tile_command_lists_descriptor_ranges.len() as u32,
-            pDescriptorRanges: per_tile_command_lists_descriptor_ranges.as_ptr() as *const _,
-        };
-        let mut per_tile_command_lists_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
-            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
-            ..mem::zeroed()
-        };
-        *per_tile_command_lists_root_parameter
-            .u
-            .DescriptorTable_mut() = per_tile_command_lists_descriptor_table;
-        let per_tile_command_lists_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 1,
-            pParameters: &per_tile_command_lists_root_parameter as *const _,
-            NumStaticSamplers: 0,
-            pStaticSamplers: ptr::null(),
-            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
-        };
-        let blob = dx12::RootSignature::serialize_description(
-            &per_tile_command_lists_root_signature_desc,
-            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
-        );
-        let per_tile_command_lists_root_signature = device.create_root_signature(0, blob);
-
-        let paint_descriptor_ranges = [
-            constants_descriptor_range,
-            objects_descriptor_range,
-            per_tile_command_lists_descriptor_range,
-            canvas_descriptor_range,
-        ];
-        let paint_descriptor_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
-            NumDescriptorRanges: paint_descriptor_ranges.len() as u32,
-            pDescriptorRanges: paint_descriptor_ranges.as_ptr() as *const _,
-        };
-        let mut paint_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
-            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_ALL,
-            ..mem::zeroed()
-        };
-        *paint_root_parameter.u.DescriptorTable_mut() = paint_descriptor_table;
-        let paint_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 1,
-            pParameters: &paint_root_parameter as *const _,
-            NumStaticSamplers: 0,
-            pStaticSamplers: ptr::null(),
-            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_NONE,
-        };
-        let blob = dx12::RootSignature::serialize_description(
-            &paint_root_signature_desc,
-            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
-        );
-        let paint_root_signature = device.create_root_signature(0, blob);
-
+    ) -> (dx12::PipelineState, dx12::PipelineState) {
         // load compute shaders
         let compute_target = String::from("cs_5_1");
 
@@ -1334,7 +1382,7 @@ impl GpuState {
 
         // create compute pipeline states
         let per_tile_command_lists_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
-            pRootSignature: per_tile_command_lists_root_signature.0.as_raw(),
+            pRootSignature: per_tile_command_lists_pipeline_root_signature.0.as_raw(),
             CS: per_tile_command_lists_shader_bytecode.bytecode,
             NodeMask: 0,
             CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
@@ -1347,7 +1395,7 @@ impl GpuState {
             device.create_compute_pipeline_state(&per_tile_command_lists_ps_desc);
 
         let paint_ps_desc = d3d12::D3D12_COMPUTE_PIPELINE_STATE_DESC {
-            pRootSignature: paint_root_signature.0.as_raw(),
+            pRootSignature: paint_pipeline_root_signature.0.as_raw(),
             CS: paint_shader_bytecode.bytecode,
             NodeMask: 0,
             CachedPSO: d3d12::D3D12_CACHED_PIPELINE_STATE {
@@ -1359,9 +1407,7 @@ impl GpuState {
         let paint_pipeline_state = device.create_compute_pipeline_state(&paint_ps_desc);
 
         (
-            per_tile_command_lists_root_signature,
             per_tile_command_lists_pipeline_state,
-            paint_root_signature,
             paint_pipeline_state,
         )
     }
@@ -1373,45 +1419,13 @@ impl GpuState {
         shader_compile_flags: minwindef::DWORD,
         vertex_entry: String,
         fragment_entry: String,
+        graphics_pipeline_root_signature: dx12::RootSignature,
         canvas_quad: Quad,
     ) -> (
-        dx12::RootSignature,
         dx12::PipelineState,
         dx12::Resource,
         d3d12::D3D12_VERTEX_BUFFER_VIEW,
     ) {
-        // create graphics root signature
-        let frag_shader_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: 0,
-            BaseShaderRegister: 1,
-            ..mem::zeroed()
-        };
-        let frag_shader_srv_table = d3d12::D3D12_ROOT_DESCRIPTOR_TABLE {
-            NumDescriptorRanges: 1,
-            pDescriptorRanges: &frag_shader_uav_descriptor_range as *const _,
-        };
-        let mut graphics_root_parameter = d3d12::D3D12_ROOT_PARAMETER {
-            ParameterType: d3d12::D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-            ShaderVisibility: d3d12::D3D12_SHADER_VISIBILITY_PIXEL,
-            ..mem::zeroed()
-        };
-        *graphics_root_parameter.u.DescriptorTable_mut() = frag_shader_srv_table;
-        let graphics_root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
-            NumParameters: 1,
-            pParameters: &graphics_root_parameter as *const _,
-            NumStaticSamplers: 0,
-            pStaticSamplers: ptr::null(),
-            Flags: d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
-        };
-        // serialize root signature description and create graphics root signature
-        let blob = dx12::RootSignature::serialize_description(
-            &graphics_root_signature_desc,
-            d3d12::D3D_ROOT_SIGNATURE_VERSION_1,
-        );
-        let graphics_root_signature = device.create_root_signature(0, blob);
-
         // create vertex buffer
         let vertices = canvas_quad.as_vertices();
         let vertex_buffer_stride = mem::size_of::<Vertex>();
@@ -1491,7 +1505,7 @@ impl GpuState {
         let ieds = [position_ied.as_winapi_struct()];
 
         let graphics_ps_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC {
-            pRootSignature: graphics_root_signature.0.as_raw(),
+            pRootSignature: graphics_pipeline_root_signature.0.as_raw(),
             VS: graphics_vertex_shader_bytecode.bytecode,
             PS: graphics_fragment_shader_bytecode.bytecode,
             DS: dx12::ShaderByteCode::empty().bytecode,
@@ -1563,12 +1577,7 @@ impl GpuState {
         };
         let graphics_pipeline_state = device.create_graphics_pipeline_state(&graphics_ps_desc);
 
-        (
-            graphics_root_signature,
-            graphics_pipeline_state,
-            vertex_buffer,
-            vertex_buffer_view,
-        )
+        (graphics_pipeline_state, vertex_buffer, vertex_buffer_view)
     }
 
     unsafe fn create_pipeline_states(
@@ -1578,17 +1587,17 @@ impl GpuState {
         vertex_shader_path: &Path,
         fragment_shader_path: &Path,
         per_tile_command_lists_entry: String,
+        per_tile_command_lists_pipeline_root_signature: dx12::RootSignature,
+        paint_pipeline_root_signature: dx12::RootSignature,
         paint_entry: String,
         vertex_entry: String,
         fragment_entry: String,
+        graphics_pipeline_root_signature: dx12::RootSignature,
         command_allocators: &Vec<dx12::CommandAllocator>,
         screen_quad: Quad,
     ) -> (
-        dx12::RootSignature,
         dx12::PipelineState,
-        dx12::RootSignature,
         dx12::PipelineState,
-        dx12::RootSignature,
         dx12::PipelineState,
         dx12::Resource,
         d3d12::D3D12_VERTEX_BUFFER_VIEW,
@@ -1601,21 +1610,18 @@ impl GpuState {
         let shader_compile_flags: minwindef::DWORD = winapi::um::d3dcompiler::D3DCOMPILE_DEBUG
             | winapi::um::d3dcompiler::D3DCOMPILE_SKIP_OPTIMIZATION;
 
-        let (
-            per_tile_command_lists_root_signature,
-            per_tile_command_lists_pipeline_state,
-            paint_root_signature,
-            paint_pipeline_state,
-        ) = GpuState::create_compute_pipeline_states(
+        let (per_tile_command_lists_pipeline_state, paint_pipeline_state) = GpuState::create_compute_pipeline_states(
             device.clone(),
             ptcl_kernel_path,
             paint_kernel_path,
             shader_compile_flags,
             per_tile_command_lists_entry,
+            per_tile_command_lists_pipeline_root_signature,
+            paint_pipeline_root_signature,
             paint_entry,
         );
 
-        let (graphics_root_signature, graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
+        let (graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
             GpuState::create_graphics_pipeline_state(
                 device.clone(),
                 vertex_shader_path,
@@ -1623,6 +1629,7 @@ impl GpuState {
                 shader_compile_flags,
                 vertex_entry,
                 fragment_entry,
+                graphics_pipeline_root_signature,
                 screen_quad,
             );
 
@@ -1637,11 +1644,8 @@ impl GpuState {
         command_list.close();
 
         (
-            per_tile_command_lists_root_signature,
             per_tile_command_lists_pipeline_state,
-            paint_root_signature,
             paint_pipeline_state,
-            graphics_root_signature,
             graphics_pipeline_state,
             vertex_buffer,
             vertex_buffer_view,

@@ -607,7 +607,7 @@ impl Device {
             .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
     }
 
-    pub unsafe fn create_texture2D_shader_resource_view(
+    pub unsafe fn create_texture2d_shader_resource_view(
         &self,
         resource: Resource,
         format: dxgiformat::DXGI_FORMAT,
@@ -886,11 +886,11 @@ impl GraphicsCommandList {
         .expect("could not reset command list");
     }
 
-    pub unsafe fn set_compute_root_signature(&self, signature: RootSignature) {
+    pub unsafe fn set_compute_pipeline_root_signature(&self, signature: RootSignature) {
         self.0.SetComputeRootSignature(signature.0.as_raw());
     }
 
-    pub unsafe fn set_graphics_root_signature(&self, signature: RootSignature) {
+    pub unsafe fn set_graphics_pipeline_root_signature(&self, signature: RootSignature) {
         self.0.SetGraphicsRootSignature(signature.0.as_raw());
     }
 

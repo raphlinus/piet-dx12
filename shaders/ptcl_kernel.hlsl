@@ -1,14 +1,13 @@
 cbuffer Constants : register(b0)
 {
-	uint num_circles;
+	uint num_objects;
+	uint object_size;
 	uint tile_size;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
-ByteAddressBuffer object_data : register(t0);
-ByteAddressBuffer circle_color_buffer : register(t1);
-
+ByteAddressBuffer object_data_buffer : register(t0);
 RWByteAddressBuffer per_tile_command_list: register(u0);
 RWTexture2D<float4> canvas : register(u1);
 
@@ -51,31 +50,29 @@ bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
 
 #include "shaders/unpack.hlsl"
 
-uint pack_command(uint tile_ix) {
-    return tile_ix;
-}
-
 [numthreads(32, 1, 1)]
 void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
     uint linear_tile_ix = num_tiles_x*DTid.y + DTid.x;
-    uint current_command_address = num_circles*linear_tile_ix*4;
-    uint next_tile_command_start_address = current_command_address + num_circles*4;
-    uint num_commands = 0;
+    uint size_of_command_list = 4 + num_objects*object_size;
+    uint init_address = size_of_command_list*linear_tile_ix;
+
+    uint this_tile_num_commands = 0;
     uint4 tile_bbox = generate_tile_bbox(DTid.xy);
 
-    for (uint i = 0; i < num_circles; i++) {
-        uint4 object_bbox = load_bbox_at_index(i);
+    for (uint i = 0; i < num_objects; i++) {
+        uint2 packed_bbox = load_packed_bbox_at_index(i);
+        uint4 object_bbox = unpack_bbox(packed_bbox);
         bool hit = do_bbox_interiors_intersect(object_bbox, tile_bbox);
 
         if (hit) {
-            per_tile_command_list.Store(current_command_address, pack_command(i));
-            current_command_address += 4;
+            uint object_specific_data = load_packed_object_specific_data_at_index(i);
+            uint object_color = load_packed_color_at_index(i);
+            uint current_address = 4 + init_address + this_tile_num_commands*object_size;
+            per_tile_command_list.Store4(current_address, repack_command(packed_object_specific_data, packed_bbox, packed_color));
+            this_tile_num_commands += 1;
         }
     }
 
-    // mark end of command list for this tile, if command list does not take up entire allocated space
-    if (current_command_address < next_tile_command_start_address) {
-        per_tile_command_list.Store(current_command_address, 4294967295);
-    }
+    per_tile_command_list.Store(init_address, this_tile_num_commands);
 }
 
