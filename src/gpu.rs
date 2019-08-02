@@ -1,7 +1,7 @@
 extern crate winapi;
 
 use crate::dx12;
-use crate::glyphs::load_raw_glyphs;
+use crate::glyphs::{load_raw_atlas, RawAtlas};
 use crate::scene;
 use crate::window;
 use std::path::{Path, PathBuf};
@@ -91,6 +91,7 @@ enum TimingQueryPoints {
     PtclDispatch,
     PtclBufferSync,
     PaintInitComplete,
+    PaintAtlasUpdated,
     PaintDispatch,
     CanvasBufferSync,
     DrawInitComplete,
@@ -105,6 +106,7 @@ struct TimingData {
     ptcl_dispatch_ts: Vec<f64>,
     ptcl_buf_sync_ts: Vec<f64>,
     paint_init_complete_ts: Vec<f64>,
+    paint_atlas_updated_ts: Vec<f64>,
     paint_dispatch_ts: Vec<f64>,
     canvas_buf_sync_ts: Vec<f64>,
     draw_init_complete_ts: Vec<f64>,
@@ -129,6 +131,7 @@ fn interpret_timing_data_in_ms(
     let mut ptcl_dispatch_ts = Vec::<f64>::new();
     let mut ptcl_buf_sync_ts = Vec::<f64>::new();
     let mut paint_init_complete_ts = Vec::<f64>::new();
+    let mut paint_atlas_updated_ts = Vec::<f64>::new();
     let mut paint_dispatch_ts = Vec::<f64>::new();
     let mut canvas_buf_sync_ts = Vec::<f64>::new();
     let mut draw_init_complete_ts = Vec::<f64>::new();
@@ -141,6 +144,7 @@ fn interpret_timing_data_in_ms(
     let ptcl_buf_sync_offset = TimingQueryPoints::PtclBufferSync as usize;
     let paint_init_complete_offset = TimingQueryPoints::PaintInitComplete as usize;
     let paint_dispatch_offset = TimingQueryPoints::PaintDispatch as usize;
+    let paint_atlas_updated_offset = TimingQueryPoints::PaintAtlasUpdated as usize;
     let canvas_buf_sync_offset = TimingQueryPoints::CanvasBufferSync as usize;
     let draw_init_complete_offset = TimingQueryPoints::DrawInitComplete as usize;
     let draw_offset = TimingQueryPoints::Draw as usize;
@@ -155,6 +159,7 @@ fn interpret_timing_data_in_ms(
             ptcl_dispatch_tp,
             ptcl_buf_sync_tp,
             paint_init_complete_tp,
+            paint_atlas_updated_tp,
             paint_dispatch_tp,
             canvas_buf_sync_tp,
             draw_init_complete_tp,
@@ -166,6 +171,7 @@ fn interpret_timing_data_in_ms(
             timing_data_in_ms[ix + ptcl_dispatch_offset],
             timing_data_in_ms[ix + ptcl_buf_sync_offset],
             timing_data_in_ms[ix + paint_init_complete_offset],
+            timing_data_in_ms[ix + paint_atlas_updated_offset],
             timing_data_in_ms[ix + paint_dispatch_offset],
             timing_data_in_ms[ix + canvas_buf_sync_offset],
             timing_data_in_ms[ix + draw_init_complete_offset],
@@ -178,7 +184,8 @@ fn interpret_timing_data_in_ms(
         ptcl_dispatch_ts.push(ptcl_dispatch_tp - ptcl_init_complete_tp);
         ptcl_buf_sync_ts.push(ptcl_buf_sync_tp - ptcl_dispatch_tp);
         paint_init_complete_ts.push(paint_init_complete_tp - ptcl_buf_sync_tp);
-        paint_dispatch_ts.push(paint_dispatch_tp - paint_init_complete_tp);
+        paint_atlas_updated_ts.push(paint_atlas_updated_tp - paint_init_complete_tp);
+        paint_dispatch_ts.push(paint_dispatch_tp - paint_atlas_updated_tp);
         canvas_buf_sync_ts.push(canvas_buf_sync_tp - paint_dispatch_tp);
         draw_init_complete_ts.push(draw_init_complete_tp - canvas_buf_sync_tp);
         draw_ts.push(draw_tp - draw_init_complete_tp);
@@ -191,6 +198,7 @@ fn interpret_timing_data_in_ms(
         ptcl_dispatch_ts,
         ptcl_buf_sync_ts,
         paint_init_complete_ts,
+        paint_atlas_updated_ts,
         paint_dispatch_ts,
         canvas_buf_sync_ts,
         draw_init_complete_ts,
@@ -199,7 +207,8 @@ fn interpret_timing_data_in_ms(
     }
 }
 
-fn average_f64s(count: usize, input_data: &[f64]) -> f64 {
+fn average_f64s(input_data: &[f64]) -> f64 {
+    let count = input_data.len();
     let mut sum: f64 = 0.0;
     let num_elements: f64 = count as f64;
 
@@ -234,12 +243,14 @@ pub struct GpuState {
     num_tiles_y: u32,
     num_ptcl_tg_x: u32,
     num_ptcl_tg_y: u32,
+    raw_atlas: RawAtlas,
 
     compute_descriptor_heap: dx12::DescriptorHeap,
     constants_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
-    glyph_textures: Vec<dx12::Resource>,
+    intermediate_texture_upload_buffer: dx12::Resource,
+    atlas_texture: dx12::Resource,
     canvas_texture: dx12::Resource,
     per_tile_command_lists_pipeline_root_signature: dx12::RootSignature,
     paint_pipeline_root_signature: dx12::RootSignature,
@@ -271,12 +282,12 @@ impl GpuState {
         paint_num_tiles_per_tg_y: u32,
         num_renders: u32,
     ) -> GpuState {
-        let raw_glyphs = crate::glyphs::load_raw_glyphs();
+        let raw_atlas = load_raw_atlas();
+
         let width = wnd.get_width();
         let height = wnd.get_height();
         let num_objects = 1000;
-        let (object_size, object_data) =
-            scene::create_random_scene(width, height, num_objects, &raw_glyphs);
+        let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
         //        let num_objects = 1;
         //        let (bbox_data, color_data) = scene::create_constant_scene();
 
@@ -403,7 +414,8 @@ impl GpuState {
             constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
-            glyph_textures,
+            intermediate_texture_upload_buffer,
+            atlas_texture,
             canvas_texture,
             per_tile_command_lists_pipeline_root_signature,
             paint_pipeline_root_signature,
@@ -417,7 +429,7 @@ impl GpuState {
             num_tiles_y,
             tile_side_length_in_pixels,
             object_data,
-            raw_glyphs,
+            raw_atlas.clone(),
         );
 
         let (
@@ -474,12 +486,14 @@ impl GpuState {
             num_tiles_y,
             num_ptcl_tg_x,
             num_ptcl_tg_y,
+            raw_atlas,
 
             compute_descriptor_heap,
             constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
-            glyph_textures,
+            intermediate_texture_upload_buffer,
+            atlas_texture,
             canvas_texture,
             per_tile_command_lists_pipeline_root_signature,
             paint_pipeline_root_signature,
@@ -519,8 +533,9 @@ impl GpuState {
             TimingQueryPoints::BeginCmd as u32 + offset,
         );
 
-        self.command_list
-            .set_compute_pipeline_root_signature(self.per_tile_command_lists_pipeline_root_signature.clone());
+        self.command_list.set_compute_pipeline_root_signature(
+            self.per_tile_command_lists_pipeline_root_signature.clone(),
+        );
         self.command_list
             .set_descriptor_heaps(vec![self.compute_descriptor_heap.clone()]);
         self.command_list.set_compute_root_descriptor_table(
@@ -571,6 +586,21 @@ impl GpuState {
         self.command_list.end_timing_query(
             self.query_heap.clone(),
             TimingQueryPoints::PaintInitComplete as u32 + offset,
+        );
+
+        let transition_atlas_to_copy_dest = dx12::create_transition_resource_barrier(self.atlas_texture.0.as_raw(), d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, d3d12::D3D12_RESOURCE_STATE_COPY_DEST);
+        self.command_list
+            .set_resource_barrier(vec![transition_atlas_to_copy_dest]);
+
+        self.command_list.update_texture2d_using_intermediate_buffer(self.device.clone(), self.intermediate_texture_upload_buffer.clone(), self.atlas_texture.clone());
+
+        let transition_atlas_to_shader_resource = dx12::create_transition_resource_barrier(self.atlas_texture.0.as_raw(), d3d12::D3D12_RESOURCE_STATE_COPY_DEST, d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        self.command_list
+            .set_resource_barrier(vec![transition_atlas_to_shader_resource]);
+
+        self.command_list.end_timing_query(
+            self.query_heap.clone(),
+            TimingQueryPoints::PaintAtlasUpdated as u32 + offset,
         );
 
         self.command_list
@@ -678,6 +708,9 @@ impl GpuState {
     }
 
     pub unsafe fn render(&mut self, render_index: u32) {
+        // we expect texture uploads to be happening every frame
+        self.intermediate_texture_upload_buffer.upload_data_to_resource(self.raw_atlas.bytes.len(), self.raw_atlas.bytes.as_ptr());
+
         self.populate_command_list(render_index);
 
         self.execute_command_list();
@@ -1053,15 +1086,14 @@ impl GpuState {
         per_tile_command_lists
     }
 
-    unsafe fn create_glyph_texture(
-        raw_glyph: crate::glyphs::RawGlyph,
+    unsafe fn create_intermediate_texture_upload_buffer(
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
+        texture_data: &[u8],
         descriptor_index: u32,
     ) -> dx12::Resource {
-        let glyph_size_in_bytes = raw_glyph.bytes.len();
-        let glyph_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
             //TODO: what should MemoryPoolPreference flag be?
             MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
@@ -1069,10 +1101,10 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let glyph_resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-            Width: raw_glyph.width as u64,
-            Height: raw_glyph.height as u32,
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: texture_data.len() as u64,
+            Height: 1,
             DepthOrArraySize: 1,
             MipLevels: 1,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
@@ -1081,26 +1113,69 @@ impl GpuState {
             },
             Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
             Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
-            Format: dxgiformat::DXGI_FORMAT_R8_UNORM,
             ..mem::zeroed()
         };
-        println!("creating glyph texture buffer...");
-        let glyph_texture = device.create_committed_resource(
-            &glyph_heap_properties,
+        println!("creating intermediate texture uplaod buffer...");
+        let intermediate_texture_upload_buffer = device.create_committed_resource(
+            &heap_properties,
             //TODO: is this heap flag ok?
             d3d12::D3D12_HEAP_FLAG_NONE,
-            &glyph_resource_description,
+            &resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
         );
-        glyph_texture.upload_data_to_resource(raw_glyph.bytes.len(), raw_glyph.bytes.as_ptr());
+        intermediate_texture_upload_buffer
+            .upload_data_to_resource(texture_data.len(), texture_data.as_ptr());
+
+        intermediate_texture_upload_buffer
+    }
+
+    unsafe fn create_atlas_texture(
+        raw_atlas: RawAtlas,
+        device: dx12::Device,
+        descriptor_heap: dx12::DescriptorHeap,
+        descriptor_index: u32,
+    ) -> dx12::Resource {
+        let atlas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let atlas_resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            Width: raw_atlas.width as u64,
+            Height: raw_atlas.height as u32,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            Format: dxgiformat::DXGI_FORMAT_R8_UNORM,
+            ..mem::zeroed()
+        };
+        println!("creating atlas texture buffer...");
+        let atlas_texture = device.create_committed_resource(
+            &atlas_heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &atlas_resource_description,
+            d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            ptr::null(),
+        );
         device.create_texture2d_shader_resource_view(
-            glyph_texture.clone(),
+            atlas_texture.clone(),
             dxgiformat::DXGI_FORMAT_R8_UNORM,
             descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
         );
 
-        glyph_texture
+        atlas_texture
     }
 
     unsafe fn create_canvas_texture(
@@ -1197,21 +1272,23 @@ impl GpuState {
         num_tiles_y: u32,
         tile_side_length_in_pixels: u32,
         object_data: Vec<u8>,
-        raw_glyphs: Vec<crate::glyphs::RawGlyph>,
+        raw_atlas: RawAtlas,
     ) -> (
         dx12::DescriptorHeap,
         dx12::Resource,
         dx12::Resource,
         dx12::Resource,
-        Vec<dx12::Resource>,
+        dx12::Resource,
+        dx12::Resource,
         dx12::Resource,
         dx12::RootSignature,
         dx12::RootSignature,
     ) {
         // create compute resource descriptor heap
+        let num_expected_descriptors: u32 = 6;
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: 4 + (raw_glyphs.len() as u32),
+            NumDescriptors: num_expected_descriptors,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
@@ -1274,26 +1351,38 @@ impl GpuState {
         };
         descriptor_index += 1;
 
-        // create glyph textures
-        let mut glyph_textures = Vec::<dx12::Resource>::new();
-        let num_glyph_textures = raw_glyphs.len();
-        for raw_glyph in raw_glyphs.into_iter() {
-            let glyph_texture = GpuState::create_glyph_texture(
-                raw_glyph,
+        // create intermediate texture upload buffer
+        let intermediate_texture_upload_buffer =
+            GpuState::create_intermediate_texture_upload_buffer(
                 device.clone(),
                 compute_descriptor_heap.clone(),
+                &raw_atlas.bytes,
                 descriptor_index,
             );
-            glyph_textures.push(glyph_texture);
-            descriptor_index += 1;
-        }
-        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: num_glyph_textures as u32,
+        let intermediate_texture_upload_buffer_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: descriptor_index,
             BaseShaderRegister: 1,
             ..mem::zeroed()
         };
+        descriptor_index += 1;
+
+        // create atlas texture
+        let atlas_texture = GpuState::create_atlas_texture(
+            raw_atlas,
+            device.clone(),
+            compute_descriptor_heap.clone(),
+            descriptor_index,
+        );
+        let atlas_texture_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: descriptor_index,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
+        descriptor_index += 1;
 
         // create intermediate target resource
         let canvas_texture = GpuState::create_canvas_texture(
@@ -1311,6 +1400,8 @@ impl GpuState {
             ..mem::zeroed()
         };
         descriptor_index += 1;
+
+        assert_eq!(descriptor_index, num_expected_descriptors);
 
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
@@ -1341,7 +1432,8 @@ impl GpuState {
             constants_buffer,
             object_data_buffer,
             ptcl_buffer,
-            glyph_textures,
+            intermediate_texture_upload_buffer,
+            atlas_texture,
             canvas_texture,
             ptcl_pipeline_root_signature,
             paint_pipeline_root_signature,
@@ -1406,10 +1498,7 @@ impl GpuState {
         };
         let paint_pipeline_state = device.create_compute_pipeline_state(&paint_ps_desc);
 
-        (
-            per_tile_command_lists_pipeline_state,
-            paint_pipeline_state,
-        )
+        (per_tile_command_lists_pipeline_state, paint_pipeline_state)
     }
 
     unsafe fn create_graphics_pipeline_state(
@@ -1610,16 +1699,17 @@ impl GpuState {
         let shader_compile_flags: minwindef::DWORD = winapi::um::d3dcompiler::D3DCOMPILE_DEBUG
             | winapi::um::d3dcompiler::D3DCOMPILE_SKIP_OPTIMIZATION;
 
-        let (per_tile_command_lists_pipeline_state, paint_pipeline_state) = GpuState::create_compute_pipeline_states(
-            device.clone(),
-            ptcl_kernel_path,
-            paint_kernel_path,
-            shader_compile_flags,
-            per_tile_command_lists_entry,
-            per_tile_command_lists_pipeline_root_signature,
-            paint_pipeline_root_signature,
-            paint_entry,
-        );
+        let (per_tile_command_lists_pipeline_state, paint_pipeline_state) =
+            GpuState::create_compute_pipeline_states(
+                device.clone(),
+                ptcl_kernel_path,
+                paint_kernel_path,
+                shader_compile_flags,
+                per_tile_command_lists_entry,
+                per_tile_command_lists_pipeline_root_signature,
+                paint_pipeline_root_signature,
+                paint_entry,
+            );
 
         let (graphics_pipeline_state, vertex_buffer, vertex_buffer_view) =
             GpuState::create_graphics_pipeline_state(
@@ -1712,11 +1802,12 @@ impl GpuState {
         let tick_period_in_seconds = 1.0 / (self.command_queue.get_timestamp_frequency() as f64);
 
         let num_timepoints = (TimingQueryPoints::Count as u32) as f64;
-        let num_recorded_renders = (raw_timing_data.len() as f64) / num_timepoints;
-        //assert_eq!(self.num_renders, num_recorded_renders);
-        println!("num_recorded_renders: {}", num_recorded_renders);
 
-        println!("num recorded renders: {}", num_recorded_renders);
+        let num_expected_recorded_renders = (raw_timing_data.len() as f64) / num_timepoints;
+        //assert_eq!(self.num_renders, num_expected_recorded_renders);
+        println!("num_expected_recorded_renders: {}", num_expected_recorded_renders);
+        println!("num recorded renders: {}", self.num_renders);
+
         let timing_data = interpret_timing_data_in_ms(
             self.num_renders as usize,
             tick_period_in_seconds,
@@ -1725,20 +1816,24 @@ impl GpuState {
         println!(
             "average ptcl dispatch time (ms): {}",
             average_f64s(
-                timing_data.ptcl_dispatch_ts.len(),
                 &timing_data.ptcl_dispatch_ts
+            )
+        );
+        println!(
+            "average texture update time (ms): {}",
+            average_f64s(
+                &timing_data.paint_atlas_updated_ts
             )
         );
         println!(
             "average paint dispatch time (ms): {}",
             average_f64s(
-                timing_data.paint_dispatch_ts.len(),
                 &timing_data.paint_dispatch_ts
             )
         );
         println!(
             "average draw time (ms): {}",
-            average_f64s(timing_data.draw_ts.len(), &timing_data.draw_ts)
+            average_f64s(&timing_data.draw_ts)
         );
     }
 }

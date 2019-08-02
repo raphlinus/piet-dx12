@@ -1,3 +1,5 @@
+#include "shaders/geometry.hlsl"
+
 // simple number printing
 bool get_digit_code_0(uint digit) {
 	if (digit == 5 || digit == 6) {
@@ -63,7 +65,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x + size.x - size.y;
         og.y = origin.y - size.x;
 
-        if (in_rect(pixel_pos, og, reversed_size)) {
+        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
             return 1.0;
         }
     }
@@ -72,7 +74,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x + size.x - size.y;
         og.y = origin.y;
 
-        if (in_rect(pixel_pos, og, reversed_size)) {
+        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
             return 1.0;
         }
     }
@@ -81,7 +83,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x;
         og.y = origin.y;
 
-        if (in_rect(pixel_pos, og, size)) {
+        if (is_pixel_in_rect(pixel_pos, og, size)) {
             return 1.0;
         }
     }
@@ -90,7 +92,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x;
         og.y = origin.y;
 
-        if (in_rect(pixel_pos, og, reversed_size)) {
+        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
             return 1.0;
         }
     }
@@ -99,7 +101,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x;
         og.y = origin.y - size.x;
 
-        if (in_rect(pixel_pos, og, reversed_size)) {
+        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
             return 1.0;
         }
     }
@@ -108,7 +110,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x;
         og.y = origin.y - 2*size.x + size.y;
 
-        if (in_rect(pixel_pos, og, size)) {
+        if (is_pixel_in_rect(pixel_pos, og, size)) {
             return 1.0;
         }
     }
@@ -117,7 +119,7 @@ float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size
         og.x = origin.x;
         og.y = origin.y - size.x + 0.5*size.y;
 
-        if (in_rect(pixel_pos, og, size)) {
+        if (is_pixel_in_rect(pixel_pos, og, size)) {
             return 1.0;
         }
     }

@@ -699,6 +699,86 @@ impl Device {
 
         QueryHeap(ComPtr::from_raw(query_heap))
     }
+
+    // based on: https://github.com/microsoft/DirectX-Graphics-Samples/blob/682051ddbe4be820195fffed0bfbdbbde8611a90/Libraries/D3DX12/d3dx12.h#L1875
+    pub unsafe fn get_required_intermediate_buffer_size(
+        &self,
+        dest_resource: Resource,
+        first_subresource: u32,
+        num_subresources: u32,
+    ) -> u64 {
+
+        let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.0.GetDesc();
+
+        let mut required_size: *mut u64 = ptr::null_mut();
+        self.0.GetCopyableFootprints(
+            &desc as *const _,
+            first_subresource,
+            num_subresources,
+            0,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut required_size as *mut _ as *mut _,
+        );
+
+        *required_size
+    }
+
+    pub unsafe fn get_copyable_footprint(&self, first_subresource: u32, num_subresources: usize, base_offset: u64, dest_resource: Resource) -> (Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT>, Vec<u32>, Vec<u64>, u64) {
+        let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.0.GetDesc();
+
+        let mut layouts: Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT> = Vec::new();
+        layouts.reserve(num_subresources);
+
+        let mut num_rows: Vec<u32> = Vec::new();
+        num_rows.reserve(num_subresources);
+
+        let mut row_size_in_bytes: Vec<u64> = Vec::new();
+        row_size_in_bytes.reserve(num_subresources);
+
+        let mut total_size: *mut u64 = ptr::null_mut();
+
+        self.0.GetCopyableFootprints(
+            &desc as *const _,
+            first_subresource,
+            num_subresources as u32,
+            base_offset,
+            &mut layouts as *mut _ as *mut _,
+            &mut num_rows as *mut _ as *mut _,
+            &mut row_size_in_bytes as *mut _ as *mut _,
+            &mut total_size as *mut _ as *mut _,
+        );
+
+        layouts.set_len(num_subresources);
+        num_rows.set_len(num_subresources);
+        row_size_in_bytes.set_len(num_subresources);
+        let total_size = *total_size;
+
+        (layouts, num_rows, row_size_in_bytes, total_size)
+    }
+}
+
+pub struct SubresourceData {
+    pub data: Vec<u8>,
+    pub row_size: isize,
+    pub column_size: isize,
+}
+
+impl SubresourceData {
+    pub fn size(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn as_d3d12_subresource_data(&self) -> d3d12::D3D12_SUBRESOURCE_DATA {
+        assert_eq!(self.row_size % 256, 0);
+
+        d3d12::D3D12_SUBRESOURCE_DATA {
+            pData: self.data.as_ptr() as *const _,
+            RowPitch: self.row_size,
+            SlicePitch: self.column_size,
+        }
+    }
 }
 
 impl CommandAllocator {
@@ -1042,6 +1122,24 @@ impl GraphicsCommandList {
             destination_buffer.0.as_raw() as *mut _,
             aligned_destination_buffer_offset,
         );
+    }
+    pub unsafe fn update_texture2d_using_intermediate_buffer(&self, device: Device, intermediate_buffer: Resource, texture: Resource) {
+        let mut src = d3d12::D3D12_TEXTURE_COPY_LOCATION {
+            pResource: intermediate_buffer.0.as_raw(),
+            Type: d3d12::D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+            ..mem::zeroed()
+        };
+        *src.u.SubresourceIndex_mut() = 0;
+
+        let mut dst = d3d12::D3D12_TEXTURE_COPY_LOCATION {
+            pResource: texture.0.as_raw(),
+            Type: d3d12::D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+            ..mem::zeroed()
+        };
+        let (layout, _, _, _) = device.get_copyable_footprint(0, 1, 0, texture.clone());
+        *dst.u.PlacedFootprint_mut() = layout[0];
+
+        self.0.CopyTextureRegion(&dst as *const _, 0, 0, 0, &src as *const _, ptr::null());
     }
 }
 

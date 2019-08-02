@@ -11,7 +11,6 @@ pub unsafe fn create_random_scene(
     screen_width: u32,
     screen_height: u32,
     num_objects: u32,
-    raw_glyphs: &[crate::glyphs::RawGlyph],
 ) -> (u32, Vec<u8>) {
     let mut rng = rand::thread_rng();
 
@@ -21,42 +20,74 @@ pub unsafe fn create_random_scene(
     for n in 0..num_objects {
         let object_type: u16 = rng.gen_range(0, 2);
 
-        let (width, height, additional_data): (u16, u16, u16) = if (object_type == 0) {
+        let (
+            width,
+            height,
+            glyph_index,
+            atlas_bbox_x_min,
+            atlas_bbox_x_max,
+            atlas_bbox_y_min,
+            atlas_bbox_y_max,
+        ): (u16, u16, u16, u16, u16, u16, u16) = if (object_type == 0) {
             let diameter: u16 = rng.gen_range(20, 200);
-            (diameter, diameter, 0)
+            (diameter, diameter, 0, 0, 0, 0, 0)
         } else {
-            let digit: u16 = rng.gen_range(0, 10);
-            let relevant_raw_glyph = &raw_glyphs[digit as usize];
-            (relevant_raw_glyph.width, relevant_raw_glyph.height, digit)
+            let glyph_index: u16 = rng.gen_range(0, 10);
+            // use knowledge that toy texture atlas has only 50x50 glyphs
+            let (left, right, top, bot) = {
+                let left = glyph_index * 50;
+                let right = left + 50;
+                let top = 0;
+                let bot = top + glyph_index;
+
+                (left, right, top, bot)
+            };
+
+            (50, 50, glyph_index, left, right, top, bot)
         };
 
-        let bbox_min_x = rng.gen_range(0, screen_width as u16);
-        let bbox_min_y = rng.gen_range(0, screen_height as u16);
+        let scene_bbox_min_x = rng.gen_range(0, screen_width as u16);
+        let scene_bbox_min_y = rng.gen_range(0, screen_height as u16);
 
         object_data
-            .write_u16::<LittleEndian>(additional_data)
+            .write_u16::<LittleEndian>(glyph_index)
             .expect("could not convert u32 to bytes");
         object_data
             .write_u16::<LittleEndian>(object_type)
             .expect("could not convert u32 to bytes");
+        object_size += 4;
 
+        object_data
+            .write_u16::<LittleEndian>(atlas_bbox_x_max)
+            .expect("could not convert u32 to bytes");
+        object_data
+            .write_u16::<LittleEndian>(atlas_bbox_x_min)
+            .expect("could not convert u32 to bytes");
+        object_size += 4;
+
+        object_data
+            .write_u16::<LittleEndian>(atlas_bbox_y_max)
+            .expect("could not convert u32 to bytes");
+        object_data
+            .write_u16::<LittleEndian>(atlas_bbox_y_min)
+            .expect("could not convert u32 to bytes");
         object_size += 4;
 
         // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
         object_data
-            .write_u16::<LittleEndian>(bbox_min_x + width)
+            .write_u16::<LittleEndian>(scene_bbox_min_x + width)
             .expect("could not convert u16 to bytes");
         object_data
-            .write_u16::<LittleEndian>(bbox_min_x)
+            .write_u16::<LittleEndian>(scene_bbox_min_x)
             .expect("could not convert u16 to bytes");
         object_size += 4;
 
         // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
         object_data
-            .write_u16::<LittleEndian>(bbox_min_y + height)
+            .write_u16::<LittleEndian>(scene_bbox_min_y + height)
             .expect("could not convert u16 to bytes");
         object_data
-            .write_u16::<LittleEndian>(bbox_min_y)
+            .write_u16::<LittleEndian>(scene_bbox_min_y)
             .expect("could not convert u16 to bytes");
         object_size += 4;
 
