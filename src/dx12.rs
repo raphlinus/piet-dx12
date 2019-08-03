@@ -728,32 +728,28 @@ impl Device {
     pub unsafe fn get_copyable_footprint(&self, first_subresource: u32, num_subresources: usize, base_offset: u64, dest_resource: Resource) -> (Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT>, Vec<u32>, Vec<u64>, u64) {
         let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.0.GetDesc();
 
-        let mut layouts: Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT> = Vec::new();
-        layouts.reserve(num_subresources);
+        let mut layouts: Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT> = Vec::with_capacity(num_subresources);
 
-        let mut num_rows: Vec<u32> = Vec::new();
-        num_rows.reserve(num_subresources);
+        let mut num_rows: Vec<u32> = Vec::with_capacity(num_subresources);
 
-        let mut row_size_in_bytes: Vec<u64> = Vec::new();
-        row_size_in_bytes.reserve(num_subresources);
+        let mut row_size_in_bytes: Vec<u64> = Vec::with_capacity(num_subresources);
 
-        let mut total_size: *mut u64 = ptr::null_mut();
+        let mut total_size: u64 = 0;
 
         self.0.GetCopyableFootprints(
             &desc as *const _,
             first_subresource,
             num_subresources as u32,
             base_offset,
-            &mut layouts as *mut _ as *mut _,
-            &mut num_rows as *mut _ as *mut _,
-            &mut row_size_in_bytes as *mut _ as *mut _,
-            &mut total_size as *mut _ as *mut _,
+            layouts.as_mut_ptr(),
+            num_rows.as_mut_ptr(),
+            row_size_in_bytes.as_mut_ptr(),
+            &mut total_size as *mut _,
         );
 
         layouts.set_len(num_subresources);
         num_rows.set_len(num_subresources);
         row_size_in_bytes.set_len(num_subresources);
-        let total_size = *total_size;
 
         (layouts, num_rows, row_size_in_bytes, total_size)
     }
@@ -1126,18 +1122,18 @@ impl GraphicsCommandList {
     pub unsafe fn update_texture2d_using_intermediate_buffer(&self, device: Device, intermediate_buffer: Resource, texture: Resource) {
         let mut src = d3d12::D3D12_TEXTURE_COPY_LOCATION {
             pResource: intermediate_buffer.0.as_raw(),
-            Type: d3d12::D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-            ..mem::zeroed()
-        };
-        *src.u.SubresourceIndex_mut() = 0;
-
-        let mut dst = d3d12::D3D12_TEXTURE_COPY_LOCATION {
-            pResource: texture.0.as_raw(),
             Type: d3d12::D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
             ..mem::zeroed()
         };
         let (layout, _, _, _) = device.get_copyable_footprint(0, 1, 0, texture.clone());
-        *dst.u.PlacedFootprint_mut() = layout[0];
+        *src.u.PlacedFootprint_mut() = layout[0];
+
+        let mut dst = d3d12::D3D12_TEXTURE_COPY_LOCATION {
+            pResource: texture.0.as_raw(),
+            Type: d3d12::D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+            ..mem::zeroed()
+        };
+        *dst.u.SubresourceIndex_mut() = 0;
 
         self.0.CopyTextureRegion(&dst as *const _, 0, 0, 0, &src as *const _, ptr::null());
     }

@@ -286,8 +286,9 @@ impl GpuState {
 
         let width = wnd.get_width();
         let height = wnd.get_height();
-        let num_objects = 1000;
-        let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
+        let num_objects = 1;
+        let (object_size, object_data) = scene::create_constant_scene(width, height);
+        //let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
         //        let num_objects = 1;
         //        let (bbox_data, color_data) = scene::create_constant_scene();
 
@@ -632,7 +633,7 @@ impl GpuState {
         self.command_list.set_graphics_root_descriptor_table(
             0,
             self.compute_descriptor_heap
-                .get_gpu_descriptor_handle_at_offset(4),
+                .get_gpu_descriptor_handle_at_offset(5),
         );
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
@@ -708,6 +709,8 @@ impl GpuState {
     }
 
     pub unsafe fn render(&mut self, render_index: u32) {
+        println!("rendering frame: {}", render_index);
+
         // we expect texture uploads to be happening every frame
         self.intermediate_texture_upload_buffer.upload_data_to_resource(self.raw_atlas.bytes.len(), self.raw_atlas.bytes.as_ptr());
 
@@ -1335,7 +1338,7 @@ impl GpuState {
         descriptor_index += 1;
 
         // create per tile command list resource
-        let per_tile_command_list_buffer_size_in_u32s = num_objects * num_tiles_x * num_tiles_y;
+        let per_tile_command_list_buffer_size_in_u32s = (6*num_objects + 1) * num_tiles_x * num_tiles_y;
         let ptcl_buffer = GpuState::create_per_tile_command_lists_buffer(
             device.clone(),
             compute_descriptor_heap.clone(),
