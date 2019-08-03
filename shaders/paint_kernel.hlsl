@@ -306,21 +306,23 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
         bool hit = is_pixel_in_bbox(pixel_pos, in_scene_bbox);
 
         if (hit) {
-            float4 fg = {1.0, 0.0, 0.0, 1.0};
             uint packed_object_specific_data = load_packed_object_specific_data_from_cmd(command_address);
             uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
             uint object_type = object_specific_data.x;
 
             uint packed_color = load_packed_color_from_cmd(command_address);
             float4 color = unpack_color(packed_color);
+            // fg = color;
 
             if (object_type == 0) {
-                float4 fg = {0.0, 1.0, 0.0, 1.0};//color;calculate_pixel_color_due_to_circle(pixel_pos, in_scene_bbox, color);
+                float4 green = {0.0, 1.0, 0.0, 1.0};
+                fg = green;//color;calculate_pixel_color_due_to_circle(pixel_pos, in_scene_bbox, color);
             } else {
-                float4 fg = {0.0, 0.0, 1.0, 1.0};
+                float4 blue = {0.0, 0.0, 1.0, 1.0};
                 //uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(command_address);
                 //uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
                 //fg = calculate_pixel_color_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, color);
+                fg = blue;
             }
 
 
