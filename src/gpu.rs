@@ -741,7 +741,7 @@ impl GpuState {
     }
 
     pub unsafe fn render(&mut self, render_index: u32) {
-        println!("rendering frame: {}", render_index);
+        // println!("rendering frame: {}", render_index);
 
         // we expect texture uploads to be happening every frame
         self.intermediate_texture_upload_buffer
