@@ -9,7 +9,6 @@ cbuffer Constants : register(b0)
 
 ByteAddressBuffer object_data_buffer : register(t0);
 RWByteAddressBuffer per_tile_command_list: register(u0);
-RWTexture2D<float4> canvas : register(u1);
 
 #include "shaders/object_loaders.hlsl"
 #include "shaders/unpack.hlsl"

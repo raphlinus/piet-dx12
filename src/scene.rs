@@ -7,7 +7,13 @@ use std::io::Cursor;
 
 // HLSL weirdness: bytes 0 1 2 3 will be mapped to 3 2 1 0
 
-pub unsafe fn append_circle(object_data: &mut Vec<u8>, scene_bbox_x_min: u16, scene_bbox_y_min: u16, diameter: u16, color: [u8; 4]) {
+pub unsafe fn append_circle(
+    object_data: &mut Vec<u8>,
+    scene_bbox_x_min: u16,
+    scene_bbox_y_min: u16,
+    diameter: u16,
+    color: [u8; 4],
+) {
     // glyph_id
     object_data
         .write_u16::<LittleEndian>(0)
@@ -56,7 +62,15 @@ pub unsafe fn append_circle(object_data: &mut Vec<u8>, scene_bbox_x_min: u16, sc
     }
 }
 
-pub unsafe fn append_glyph(object_data: &mut Vec<u8>, glyph_id: u16, scene_bbox_x_min: u16, scene_bbox_y_min: u16, width: u16, height: u16, color: [u8; 4]) {
+pub unsafe fn append_glyph(
+    object_data: &mut Vec<u8>,
+    glyph_id: u16,
+    scene_bbox_x_min: u16,
+    scene_bbox_y_min: u16,
+    width: u16,
+    height: u16,
+    color: [u8; 4],
+) {
     object_data
         .write_u16::<LittleEndian>(glyph_id)
         .expect("could not convert u32 to bytes");
@@ -64,9 +78,9 @@ pub unsafe fn append_glyph(object_data: &mut Vec<u8>, glyph_id: u16, scene_bbox_
         .write_u16::<LittleEndian>(1)
         .expect("could not convert u32 to bytes");
 
-    let atlas_bbox_x_min = glyph_id*50;
+    let atlas_bbox_x_min = glyph_id * 50;
     let atlas_bbox_y_min: u16 = 0;
-    
+
     object_data
         .write_u16::<LittleEndian>(atlas_bbox_x_min + width)
         .expect("could not convert u32 to bytes");
@@ -114,28 +128,42 @@ pub unsafe fn create_random_scene(
 
     for n in 0..num_objects {
         let object_type: u16 = rng.gen_range(0, 2);
-        let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (rng.gen_range(0, screen_width) as u16, rng.gen_range(0, screen_height) as u16);
+        let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (
+            rng.gen_range(0, screen_width) as u16,
+            rng.gen_range(0, screen_height) as u16,
+        );
         let mut color: [u8; 4] = [0; 4];
         for i in 0..4 {
             color[i] = rng.gen_range(0, 256) as u8;
         }
-        
+
         if object_type == 0 {
             let diameter: u16 = rng.gen_range(20, 200);
-            append_circle(&mut object_data, scene_bbox_x_min, scene_bbox_y_min, diameter, color);
+            append_circle(
+                &mut object_data,
+                scene_bbox_x_min,
+                scene_bbox_y_min,
+                diameter,
+                color,
+            );
         } else {
             let glyph_id: u16 = rng.gen_range(0, 10);
-            append_glyph(&mut object_data, glyph_id, scene_bbox_x_min, scene_bbox_y_min, 50, 50, color);
+            append_glyph(
+                &mut object_data,
+                glyph_id,
+                scene_bbox_x_min,
+                scene_bbox_y_min,
+                50,
+                50,
+                color,
+            );
         }
     }
 
     (object_size, object_data)
 }
 
-pub unsafe fn create_constant_scene(
-    screen_width: u32,
-    screen_height: u32,
-) -> (u32, Vec<u8>) {
+pub unsafe fn create_constant_scene(screen_width: u32, screen_height: u32) -> (u32, Vec<u8>) {
     let mut rng = rand::thread_rng();
 
     let mut object_data: Vec<u8> = Vec::new();
@@ -146,8 +174,15 @@ pub unsafe fn create_constant_scene(
     let color: [u8; 4] = [255, 255, 255, 255];
 
     append_circle(&mut object_data, scene_bbox_x_min, scene_bbox_y_min, diameter, color);
-    // append_glyph(&mut object_data, 0, scene_bbox_x_min + 500, scene_bbox_y_min, 50, 50, color);
+    append_glyph(
+        &mut object_data,
+        0,
+        scene_bbox_x_min + 500,
+        scene_bbox_y_min,
+        50,
+        50,
+        color,
+    );
 
     (object_size, object_data)
 }
-

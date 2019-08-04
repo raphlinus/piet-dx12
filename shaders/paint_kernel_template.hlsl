@@ -9,8 +9,8 @@ cbuffer Constants : register(b0)
 
 
 ByteAddressBuffer object_data_buffer : register(t0);
-Texture2D<float> glyph_atlas : register(t1);
 RWByteAddressBuffer per_tile_command_list: register(u0);
+Texture2D<float> glyph_atlas : register(t1);
 RWTexture2D<float4> canvas : register(u1);
 
 #include "shaders/object_loaders.hlsl"
@@ -62,26 +62,23 @@ float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
     return alpha;
 }
 
-float4 calculate_pixel_color_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, float4 circle_color) {
+float calculate_pixel_alpha_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, float color_alpha) {
     uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5), lerp(circle_bbox[2], circle_bbox[3], 0.5)};
     float radius = (circle_bbox[1] - circle_bbox[0])*0.5;
     float position_based_alpha = circle_shader(pixel_pos, circle_center, radius);
 
-    float4 pixel_color = {circle_color.r, circle_color.g, circle_color.b, circle_color.a*position_based_alpha};
-    return pixel_color;
+    float pixel_alpha = color_alpha*position_based_alpha;
+
+    return pixel_alpha;
 }
 
-float4 calculate_pixel_color_due_to_glyph(uint2 pixel_pos, uint4 glyph_atlas_bbox, uint4 glyph_in_scene_bbox, float4 color) {
-    uint2 atlas_pixel_pos = {glyph_atlas_bbox[0] + (pixel_pos.x - glyph_in_scene_bbox[0]), glyph_atlas_bbox[2] + (pixel_pos.y - glyph_in_scene_bbox[2])};
+float calculate_pixel_alpha_due_to_glyph(uint2 pixel_pos, uint4 in_atlas_bbox, uint4 in_scene_bbox, float color_alpha) {
+    uint2 atlas_pixel_pos = {in_atlas_bbox[0] + (pixel_pos.x - in_scene_bbox[0]), in_atlas_bbox[2] + (pixel_pos.y - in_scene_bbox[2])};
     float glyph_alpha = glyph_atlas[atlas_pixel_pos];
 
-    float4 pixel_color = {0.0, 0.0, 0.0, 0.0};
+    float pixel_alpha = color_alpha*glyph_alpha;
 
-    if (glyph_alpha > 0.0) {
-        float4 pixel_color = {color.r, color.g, color.b, color.a*glyph_alpha};
-    }
-
-    return pixel_color;
+    return pixel_alpha;
 }
 
 float4 blend_pd_over(float4 bg, float4 fg) {
@@ -311,44 +308,48 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             uint object_type = object_specific_data.x;
 
             uint packed_color = load_packed_color_from_cmd(command_address);
-            float4 color = unpack_color(packed_color);
-            // fg = color;
+            fg = unpack_color(packed_color);
 
             if (object_type == 0) {
-                float4 green = {0.0, 1.0, 0.0, 1.0};
-                fg = green;//color;calculate_pixel_color_due_to_circle(pixel_pos, in_scene_bbox, color);
+                //float4 green = {0.0, 1.0, 0.0, 1.0};
+                fg.a = calculate_pixel_alpha_due_to_circle(pixel_pos, in_scene_bbox, fg.a);
             } else {
-                float4 blue = {0.0, 0.0, 1.0, 1.0};
-                //uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(command_address);
-                //uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
-                //fg = calculate_pixel_color_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, color);
-                fg = blue;
-            }
+                //float4 blue = {0.0, 0.0, 1.0, 1.0};
+                uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(command_address);
+                uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
 
+                fg.a = calculate_pixel_alpha_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, fg.a);
+            }
 
             bg = blend_pd_over(bg, fg);
         }
     }
 
     /**
+    uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_at_object_index(0);
+    uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
     uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_at_object_index(0);
     uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
-    uint4 tile_bbox = generate_tile_bbox(Gid.xy);
-    uint2 tile_coords = {12, 12};
-    uint4 focus_tile_bbox = generate_tile_bbox(tile_coords);
-    bool scene_bbox_hit = do_bbox_interiors_intersect(in_scene_bbox, tile_bbox);
-    bool focus_tile_hit = is_pixel_in_bbox(pixel_pos, focus_tile_bbox);
-    uint packed_object_specific_data = load_packed_object_specific_data_from_cmd(init_address);
-    uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
-    uint object_type = object_specific_data.x;
 
     uint2 rect_origin = {800, 300};
     uint2 rect_size = {50, 10};
     fg.r = 1.0;
     fg.g = 1.0;
     fg.b = 1.0;
-    fg.a = number_shader(object_type, pixel_pos, rect_origin, rect_size);
+    fg.a = 0.0;
 
+    uint4 atlas_bbox = {0, 512, 0, 50};
+
+    bool hit = is_pixel_in_bbox(pixel_pos, atlas_bbox);
+    if (hit) {
+        //uint2 atlas_pixel_pos = {pixel_pos.x - in_scene_bbox[0], pixel_pos.y - in_scene_bbox[2]};
+        fg.a = glyph_atlas[pixel_pos];
+    }
+
+    // fg.a = number_shader(in_atlas_bbox[1], pixel_pos, rect_origin, rect_size);
+
+    bg = blend_pd_over(bg, fg);
+    **/
     /**
     if (scene_bbox_hit) {
         fg.r = 1.0;

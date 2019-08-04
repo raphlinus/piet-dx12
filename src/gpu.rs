@@ -219,6 +219,22 @@ fn average_f64s(input_data: &[f64]) -> f64 {
     return sum / num_elements;
 }
 
+pub enum PtclDescriptorRanges {
+    Constants,
+    Objects,
+    PerTileCommandLists,
+    Count,
+}
+
+pub enum PaintDescriptorRanges {
+    Constants,
+    Objects,
+    PerTileCommandLists,
+    AtlasTexture,
+    Canvas,
+    Count,
+}
+
 pub struct GpuState {
     width: u32,
     height: u32,
@@ -286,8 +302,11 @@ impl GpuState {
 
         let width = wnd.get_width();
         let height = wnd.get_height();
-        let num_objects = 1;
-        let (object_size, object_data) = scene::create_constant_scene(width, height);
+//        let num_objects = 2;
+//        let (object_size, object_data) = scene::create_constant_scene(width, height);
+        let num_objects = 1000;
+        let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
+
         //let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
         //        let num_objects = 1;
         //        let (bbox_data, color_data) = scene::create_constant_scene();
@@ -562,7 +581,7 @@ impl GpuState {
 
         // need to ensure all writes to per_tile_command_lists are complete before any reads are done
         let synchronize_wrt_per_tile_command_lists =
-            dx12::create_uav_resource_barrier(self.per_tile_command_lists_buffer.0.as_raw());
+            dx12::create_uav_resource_barrier(self.per_tile_command_lists_buffer.com_ptr.as_raw());
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_per_tile_command_lists]);
 
@@ -589,13 +608,26 @@ impl GpuState {
             TimingQueryPoints::PaintInitComplete as u32 + offset,
         );
 
-        let transition_atlas_to_copy_dest = dx12::create_transition_resource_barrier(self.atlas_texture.0.as_raw(), d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, d3d12::D3D12_RESOURCE_STATE_COPY_DEST);
+        let transition_atlas_to_copy_dest = dx12::create_transition_resource_barrier(
+            self.atlas_texture.com_ptr.as_raw(),
+            d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
+        );
         self.command_list
             .set_resource_barrier(vec![transition_atlas_to_copy_dest]);
 
-        self.command_list.update_texture2d_using_intermediate_buffer(self.device.clone(), self.intermediate_texture_upload_buffer.clone(), self.atlas_texture.clone());
+        self.command_list
+            .update_texture2d_using_intermediate_buffer(
+                self.device.clone(),
+                self.intermediate_texture_upload_buffer.clone(),
+                self.atlas_texture.clone(),
+            );
 
-        let transition_atlas_to_shader_resource = dx12::create_transition_resource_barrier(self.atlas_texture.0.as_raw(), d3d12::D3D12_RESOURCE_STATE_COPY_DEST, d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        let transition_atlas_to_shader_resource = dx12::create_transition_resource_barrier(
+            self.atlas_texture.com_ptr.as_raw(),
+            d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
+            d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        );
         self.command_list
             .set_resource_barrier(vec![transition_atlas_to_shader_resource]);
 
@@ -614,7 +646,7 @@ impl GpuState {
 
         // need to ensure all writes to intermediate are complete before any reads are done
         let synchronize_wrt_canvas =
-            dx12::create_uav_resource_barrier(self.canvas_texture.0.as_raw());
+            dx12::create_uav_resource_barrier(self.canvas_texture.com_ptr.as_raw());
         self.command_list
             .set_resource_barrier(vec![synchronize_wrt_canvas]);
 
@@ -633,13 +665,13 @@ impl GpuState {
         self.command_list.set_graphics_root_descriptor_table(
             0,
             self.compute_descriptor_heap
-                .get_gpu_descriptor_handle_at_offset(5),
+                .get_gpu_descriptor_handle_at_offset(self.canvas_texture.descriptor_heap_offset),
         );
         self.command_list.set_viewport(&self.viewport);
         self.command_list.set_scissor_rect(&self.scissor_rect);
 
         let transition_render_target_from_present = dx12::create_transition_resource_barrier(
-            self.render_targets[self.frame_index].0.as_raw(),
+            self.render_targets[self.frame_index].com_ptr.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
         );
@@ -671,7 +703,7 @@ impl GpuState {
         );
 
         let transition_render_target_to_present = dx12::create_transition_resource_barrier(
-            self.render_targets[self.frame_index].0.as_raw(),
+            self.render_targets[self.frame_index].com_ptr.as_raw(),
             d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
             d3d12::D3D12_RESOURCE_STATE_PRESENT,
         );
@@ -692,7 +724,7 @@ impl GpuState {
                 0,
             );
             //            let transition_timing_query_heap_to_read = dx12::create_transition_resource_barrier(
-            //                self.timing_query_buffer.0.as_raw(),
+            //                self.timing_query_buffer.com_ptr.as_raw(),
             //                d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
             //                d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             //            );
@@ -712,7 +744,8 @@ impl GpuState {
         println!("rendering frame: {}", render_index);
 
         // we expect texture uploads to be happening every frame
-        self.intermediate_texture_upload_buffer.upload_data_to_resource(self.raw_atlas.bytes.len(), self.raw_atlas.bytes.as_ptr());
+        self.intermediate_texture_upload_buffer
+            .upload_data_to_resource(self.raw_atlas.bytes.len(), self.raw_atlas.bytes.as_ptr());
 
         self.populate_command_list(render_index);
 
@@ -921,7 +954,7 @@ impl GpuState {
         constants: &[u32],
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
-        descriptor_index: u32,
+        descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         let constant_buffer_stride = mem::size_of::<u32>();
         let constant_buffer_size = constant_buffer_stride * constants.len();
@@ -958,12 +991,14 @@ impl GpuState {
             &constants_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
+            descriptor_heap_offset,
         );
         println!("creating constants buffer...");
         constants_buffer.upload_data_to_resource(256, constants.as_ptr());
         device.create_constant_buffer_view(
             constants_buffer.clone(),
-            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(constants_buffer.descriptor_heap_offset),
             padded_size_in_bytes as u32,
         );
 
@@ -974,7 +1009,7 @@ impl GpuState {
         object_data: Vec<u8>,
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
-        descriptor_index: u32,
+        descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         let object_data_buffer_size_in_bytes = object_data.len();
         let object_data_buffer_size_in_u32s =
@@ -1019,12 +1054,14 @@ impl GpuState {
             &object_data_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
+            descriptor_heap_offset,
         );
         println!("creating object data buffer...");
         object_data_buffer.upload_data_to_resource(object_data.len(), object_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             object_data_buffer.clone(),
-            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(object_data_buffer.descriptor_heap_offset),
             0,
             object_data_buffer_size_in_u32s,
         );
@@ -1036,7 +1073,7 @@ impl GpuState {
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
         per_tile_command_list_buffer_size_in_u32s: u32,
-        descriptor_index: u32,
+        descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
         let per_tile_command_list_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
@@ -1070,30 +1107,33 @@ impl GpuState {
             Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
             ..mem::zeroed()
         };
-        let mut per_tile_command_lists = device.create_committed_resource(
+        let per_tile_command_lists_buffer = device.create_committed_resource(
             &per_tile_command_list_heap_properties,
             d3d12::D3D12_HEAP_FLAG_NONE,
             &per_tile_command_list_resource_desc,
             d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             ptr::null(),
+            descriptor_heap_offset,
         );
         println!("creating per tile command lists buffer...");
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
         device.create_byte_addressed_buffer_unordered_access_view(
-            per_tile_command_lists.clone(),
-            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            per_tile_command_lists_buffer.clone(),
+            descriptor_heap.get_cpu_descriptor_handle_at_offset(
+                per_tile_command_lists_buffer.descriptor_heap_offset,
+            ),
             0,
             per_tile_command_list_buffer_size_in_u32s,
         );
 
-        per_tile_command_lists
+        per_tile_command_lists_buffer
     }
 
     unsafe fn create_intermediate_texture_upload_buffer(
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
         texture_data: &[u8],
-        descriptor_index: u32,
+        descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
@@ -1126,6 +1166,7 @@ impl GpuState {
             &resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
+            descriptor_heap_offset,
         );
         intermediate_texture_upload_buffer
             .upload_data_to_resource(texture_data.len(), texture_data.as_ptr());
@@ -1137,7 +1178,7 @@ impl GpuState {
         raw_atlas: RawAtlas,
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
-        descriptor_index: u32,
+        descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         let atlas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
@@ -1171,11 +1212,13 @@ impl GpuState {
             &atlas_resource_description,
             d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
             ptr::null(),
+            descriptor_heap_offset,
         );
         device.create_texture2d_shader_resource_view(
             atlas_texture.clone(),
             dxgiformat::DXGI_FORMAT_R8_UNORM,
-            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(atlas_texture.descriptor_heap_offset),
         );
 
         atlas_texture
@@ -1186,7 +1229,7 @@ impl GpuState {
         descriptor_heap: dx12::DescriptorHeap,
         width: u64,
         height: u32,
-        descriptor_index: u32,
+        descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
         let canvas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
@@ -1226,10 +1269,12 @@ impl GpuState {
             &canvas_resource_desc,
             d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             ptr::null(),
+            descriptor_heap_offset,
         );
         device.create_unordered_access_view(
             canvas_texture.clone(),
-            descriptor_heap.get_cpu_descriptor_handle_at_offset(descriptor_index),
+            descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(canvas_texture.descriptor_heap_offset),
         );
 
         canvas_texture
@@ -1288,15 +1333,14 @@ impl GpuState {
         dx12::RootSignature,
     ) {
         // create compute resource descriptor heap
-        let num_expected_descriptors: u32 = 6;
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: num_expected_descriptors,
+            NumDescriptors: 6,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
-        let mut descriptor_index: u32 = 0;
+        let mut descriptor_heap_offset = 0;
 
         // create constants buffer
         let constants_buffer = {
@@ -1311,81 +1355,39 @@ impl GpuState {
                 &constants,
                 device.clone(),
                 compute_descriptor_heap.clone(),
-                descriptor_index,
+                descriptor_heap_offset,
             )
         };
-        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: descriptor_index,
-            ..mem::zeroed()
-        };
-        descriptor_index += 1;
+        descriptor_heap_offset += 1;
 
         // create object data buffer
         let object_data_buffer = GpuState::create_object_data_buffer(
             object_data,
             device.clone(),
             compute_descriptor_heap.clone(),
-            descriptor_index,
+            descriptor_heap_offset,
         );
-        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: descriptor_index,
-            ..mem::zeroed()
-        };
-        descriptor_index += 1;
+        descriptor_heap_offset += 1;
 
         // create per tile command list resource
-        let per_tile_command_list_buffer_size_in_u32s = (6*num_objects + 1) * num_tiles_x * num_tiles_y;
+        let per_tile_command_list_buffer_size_in_u32s =
+            (6 * num_objects + 1) * num_tiles_x * num_tiles_y;
         let ptcl_buffer = GpuState::create_per_tile_command_lists_buffer(
             device.clone(),
             compute_descriptor_heap.clone(),
             per_tile_command_list_buffer_size_in_u32s,
-            descriptor_index,
+            descriptor_heap_offset,
         );
-        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: descriptor_index,
-            BaseShaderRegister: 0,
-            ..mem::zeroed()
-        };
-        descriptor_index += 1;
-
-        // create intermediate texture upload buffer
-        let intermediate_texture_upload_buffer =
-            GpuState::create_intermediate_texture_upload_buffer(
-                device.clone(),
-                compute_descriptor_heap.clone(),
-                &raw_atlas.bytes,
-                descriptor_index,
-            );
-        let intermediate_texture_upload_buffer_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: descriptor_index,
-            BaseShaderRegister: 1,
-            ..mem::zeroed()
-        };
-        descriptor_index += 1;
+        descriptor_heap_offset += 1;
 
         // create atlas texture
         let atlas_texture = GpuState::create_atlas_texture(
-            raw_atlas,
+            raw_atlas.clone(),
             device.clone(),
             compute_descriptor_heap.clone(),
-            descriptor_index,
+            descriptor_heap_offset,
         );
-        let atlas_texture_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: descriptor_index,
-            BaseShaderRegister: 1,
-            ..mem::zeroed()
-        };
-        descriptor_index += 1;
+        descriptor_heap_offset += 1;
 
         // create intermediate target resource
         let canvas_texture = GpuState::create_canvas_texture(
@@ -1393,43 +1395,111 @@ impl GpuState {
             compute_descriptor_heap.clone(),
             (num_tiles_x * tile_side_length_in_pixels) as u64,
             num_tiles_y * tile_side_length_in_pixels,
-            descriptor_index,
+            descriptor_heap_offset,
         );
-        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+        descriptor_heap_offset += 1;
+
+        // create intermediate texture upload buffer
+        let intermediate_texture_upload_buffer =
+            GpuState::create_intermediate_texture_upload_buffer(
+                device.clone(),
+                compute_descriptor_heap.clone(),
+                &raw_atlas.bytes,
+                descriptor_heap_offset,
+            );
+        descriptor_heap_offset += 1;
+        // this does not need to be shader visible, so we don't need a descriptor range for it
+        // important to put it at the end of the descriptor heap, so that descriptor heap offsets
+        // and descriptor table offsets match
+
+        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: descriptor_index,
-            BaseShaderRegister: 1,
+            OffsetInDescriptorsFromTableStart: PtclDescriptorRanges::Constants as u32,
             ..mem::zeroed()
         };
-        descriptor_index += 1;
-
-        assert_eq!(descriptor_index, num_expected_descriptors);
-
+        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PtclDescriptorRanges::Objects as u32,
+            ..mem::zeroed()
+        };
+        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PtclDescriptorRanges::PerTileCommandLists as u32,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
                 constants_descriptor_range,
                 objects_descriptor_range,
                 per_tile_command_lists_descriptor_range,
             ];
+            assert_eq!(
+                per_tile_command_lists_descriptor_ranges.len(),
+                PtclDescriptorRanges::Count as usize
+            );
             GpuState::create_compute_root_signature_from_descriptor_ranges(
                 device.clone(),
                 &per_tile_command_lists_descriptor_ranges,
             )
         };
 
+        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::Constants as u32,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
+        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::Objects as u32,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
+        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::PerTileCommandLists as u32,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
+        let atlas_texture_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::AtlasTexture as u32,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
+        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::Canvas as u32,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
         let paint_pipeline_root_signature = {
             let paint_descriptor_ranges = [
                 constants_descriptor_range,
                 objects_descriptor_range,
                 per_tile_command_lists_descriptor_range,
+                atlas_texture_descriptor_range,
                 canvas_descriptor_range,
             ];
+            assert_eq!(
+                paint_descriptor_ranges.len(),
+                PaintDescriptorRanges::Count as usize
+            );
             GpuState::create_compute_root_signature_from_descriptor_ranges(
                 device.clone(),
                 &paint_descriptor_ranges,
             )
         };
+
         (
             compute_descriptor_heap,
             constants_buffer,
@@ -1552,6 +1622,7 @@ impl GpuState {
             &vertex_buffer_resource_description,
             d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
             ptr::null(),
+            0,
         );
         vertex_buffer.upload_data_to_resource(vertices.len(), vertices.as_ptr());
         let vertex_buffer_view = d3d12::D3D12_VERTEX_BUFFER_VIEW {
@@ -1777,14 +1848,6 @@ impl GpuState {
             CreationNodeMask: 0,
             VisibleNodeMask: 0,
         };
-        let resource_buffer = device.create_committed_resource(
-            &timing_query_buffer_heap_properties,
-            //TODO: is this heap flag ok?
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &timing_query_buffer_description,
-            d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
-            ptr::null(),
-        );
 
         device.create_committed_resource(
             &timing_query_buffer_heap_properties,
@@ -1792,6 +1855,7 @@ impl GpuState {
             &timing_query_buffer_description,
             d3d12::D3D12_RESOURCE_STATE_COPY_DEST,
             ptr::null(),
+            0,
         )
     }
 
@@ -1808,7 +1872,10 @@ impl GpuState {
 
         let num_expected_recorded_renders = (raw_timing_data.len() as f64) / num_timepoints;
         //assert_eq!(self.num_renders, num_expected_recorded_renders);
-        println!("num_expected_recorded_renders: {}", num_expected_recorded_renders);
+        println!(
+            "num_expected_recorded_renders: {}",
+            num_expected_recorded_renders
+        );
         println!("num recorded renders: {}", self.num_renders);
 
         let timing_data = interpret_timing_data_in_ms(
@@ -1818,21 +1885,15 @@ impl GpuState {
         );
         println!(
             "average ptcl dispatch time (ms): {}",
-            average_f64s(
-                &timing_data.ptcl_dispatch_ts
-            )
+            average_f64s(&timing_data.ptcl_dispatch_ts)
         );
         println!(
             "average texture update time (ms): {}",
-            average_f64s(
-                &timing_data.paint_atlas_updated_ts
-            )
+            average_f64s(&timing_data.paint_atlas_updated_ts)
         );
         println!(
             "average paint dispatch time (ms): {}",
-            average_f64s(
-                &timing_data.paint_dispatch_ts
-            )
+            average_f64s(&timing_data.paint_dispatch_ts)
         );
         println!(
             "average draw time (ms): {}",

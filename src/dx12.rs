@@ -15,9 +15,13 @@ use wio::com::ComPtr;
 
 #[derive(Clone)]
 pub struct Heap(pub ComPtr<d3d12::ID3D12Heap>);
-pub type Subresource = u32;
+
 #[derive(Clone)]
-pub struct Resource(pub ComPtr<d3d12::ID3D12Resource>);
+pub struct Resource {
+    pub com_ptr: ComPtr<d3d12::ID3D12Resource>,
+    pub descriptor_heap_offset: u32,
+}
+
 pub struct VertexBufferView(pub ComPtr<d3d12::D3D12_VERTEX_BUFFER_VIEW>);
 
 #[derive(Clone)]
@@ -88,17 +92,27 @@ pub struct DebugController(pub d3d12sdklayers::ID3D12Debug);
 pub struct QueryHeap(pub ComPtr<d3d12::ID3D12QueryHeap>);
 
 impl Resource {
+    pub unsafe fn new(
+        com_ptr: ComPtr<d3d12::ID3D12Resource>,
+        descriptor_heap_offset: u32,
+    ) -> Resource {
+        Resource {
+            com_ptr,
+            descriptor_heap_offset,
+        }
+    }
+
     pub unsafe fn upload_data_to_resource<T>(&self, count: usize, data: *const T) {
         let mut mapped_memory = ptr::null_mut();
         let zero_range = d3d12::D3D12_RANGE { ..mem::zeroed() };
-        error::error_if_failed_else_unit(self.0.Map(
+        error::error_if_failed_else_unit(self.com_ptr.Map(
             0,
             &zero_range as *const _,
             &mut mapped_memory as *mut _ as *mut _,
         ))
         .expect("could not map GPU mem to CPU mem");
         ptr::copy(data, mapped_memory, count);
-        self.0.Unmap(0, ptr::null());
+        self.com_ptr.Unmap(0, ptr::null());
     }
 
     pub unsafe fn download_data_from_resource<T>(&self, count: usize) -> Vec<T> {
@@ -108,7 +122,7 @@ impl Resource {
             Begin: 0,
             End: data_size_in_bytes * count,
         };
-        error::error_if_failed_else_unit(self.0.Map(
+        error::error_if_failed_else_unit(self.com_ptr.Map(
             0,
             &zero_range as *const _,
             &mut mapped_memory as *mut _ as *mut _,
@@ -122,13 +136,13 @@ impl Resource {
             count,
         );
         result.set_len(count);
-        self.0.Unmap(0, ptr::null());
+        self.com_ptr.Unmap(0, ptr::null());
 
         result
     }
 
     pub unsafe fn get_gpu_virtual_address(&self) -> d3d12::D3D12_GPU_VIRTUAL_ADDRESS {
-        self.0.GetGPUVirtualAddress()
+        self.com_ptr.GetGPUVirtualAddress()
     }
 }
 
@@ -217,7 +231,7 @@ impl SwapChain {
         ))
         .expect("SwapChain could not get buffer");
 
-        Resource(ComPtr::from_raw(resource))
+        Resource::new(ComPtr::from_raw(resource), 0)
     }
 
     // TODO: present flags
@@ -244,7 +258,7 @@ impl SwapChain1 {
         ))
         .expect("SwapChain1 could not get buffer");
 
-        Resource(ComPtr::from_raw(resource))
+        Resource::new(ComPtr::from_raw(resource), 0)
     }
 }
 
@@ -258,7 +272,7 @@ impl SwapChain3 {
         ))
         .expect("SwapChain3 could not get buffer");
 
-        Resource(ComPtr::from_raw(resource))
+        Resource::new(ComPtr::from_raw(resource), 0)
     }
 
     pub unsafe fn get_current_back_buffer_index(&self) -> u32 {
@@ -523,7 +537,7 @@ impl Device {
             Flags: d3d12::D3D12_BUFFER_UAV_FLAG_RAW,
         };
         self.0.CreateUnorderedAccessView(
-            resource.0.as_raw(),
+            resource.com_ptr.as_raw(),
             ptr::null_mut(),
             &uav_desc as *const _,
             descriptor,
@@ -536,7 +550,7 @@ impl Device {
         descriptor: CpuDescriptor,
     ) {
         self.0.CreateUnorderedAccessView(
-            resource.0.as_raw(),
+            resource.com_ptr.as_raw(),
             ptr::null_mut(),
             ptr::null(),
             descriptor,
@@ -579,8 +593,11 @@ impl Device {
             // shouldn't flags be d3d12::D3D12_BUFFER_SRV_FLAG_RAW?
             Flags: d3d12::D3D12_BUFFER_SRV_FLAG_RAW,
         };
-        self.0
-            .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
+        self.0.CreateShaderResourceView(
+            resource.com_ptr.as_raw(),
+            &srv_desc as *const _,
+            descriptor,
+        );
     }
 
     pub unsafe fn create_structured_buffer_shader_resource_view(
@@ -603,8 +620,11 @@ impl Device {
             StructureByteStride: structure_byte_stride,
             Flags: d3d12::D3D12_BUFFER_SRV_FLAG_NONE,
         };
-        self.0
-            .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
+        self.0.CreateShaderResourceView(
+            resource.com_ptr.as_raw(),
+            &srv_desc as *const _,
+            descriptor,
+        );
     }
 
     pub unsafe fn create_texture2d_shader_resource_view(
@@ -625,8 +645,11 @@ impl Device {
             PlaneSlice: 0,
             ResourceMinLODClamp: 0.0,
         };
-        self.0
-            .CreateShaderResourceView(resource.0.as_raw(), &srv_desc as *const _, descriptor);
+        self.0.CreateShaderResourceView(
+            resource.com_ptr.as_raw(),
+            &srv_desc as *const _,
+            descriptor,
+        );
     }
 
     pub unsafe fn create_render_target_view(
@@ -636,7 +659,7 @@ impl Device {
         descriptor: CpuDescriptor,
     ) {
         self.0
-            .CreateRenderTargetView(resource.0.as_raw(), desc, descriptor);
+            .CreateRenderTargetView(resource.com_ptr.as_raw(), desc, descriptor);
     }
 
     // TODO: interface not complete
@@ -660,6 +683,7 @@ impl Device {
         resource_description: &d3d12::D3D12_RESOURCE_DESC,
         initial_resource_state: d3d12::D3D12_RESOURCE_STATES,
         optimized_clear_value: *const d3d12::D3D12_CLEAR_VALUE,
+        descriptor_heap_offset: u32,
     ) -> Resource {
         let mut resource = ptr::null_mut();
 
@@ -674,7 +698,7 @@ impl Device {
         ))
         .expect("device could not create committed resource");
 
-        Resource(ComPtr::from_raw(resource))
+        Resource::new(ComPtr::from_raw(resource), descriptor_heap_offset)
     }
 
     pub unsafe fn create_query_heap(
@@ -707,8 +731,7 @@ impl Device {
         first_subresource: u32,
         num_subresources: u32,
     ) -> u64 {
-
-        let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.0.GetDesc();
+        let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.com_ptr.GetDesc();
 
         let mut required_size: *mut u64 = ptr::null_mut();
         self.0.GetCopyableFootprints(
@@ -725,10 +748,22 @@ impl Device {
         *required_size
     }
 
-    pub unsafe fn get_copyable_footprint(&self, first_subresource: u32, num_subresources: usize, base_offset: u64, dest_resource: Resource) -> (Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT>, Vec<u32>, Vec<u64>, u64) {
-        let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.0.GetDesc();
+    pub unsafe fn get_copyable_footprint(
+        &self,
+        first_subresource: u32,
+        num_subresources: usize,
+        base_offset: u64,
+        dest_resource: Resource,
+    ) -> (
+        Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT>,
+        Vec<u32>,
+        Vec<u64>,
+        u64,
+    ) {
+        let desc: d3d12::D3D12_RESOURCE_DESC = dest_resource.com_ptr.GetDesc();
 
-        let mut layouts: Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT> = Vec::with_capacity(num_subresources);
+        let mut layouts: Vec<d3d12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT> =
+            Vec::with_capacity(num_subresources);
 
         let mut num_rows: Vec<u32> = Vec::with_capacity(num_subresources);
 
@@ -1115,13 +1150,18 @@ impl GraphicsCommandList {
             d3d12::D3D12_QUERY_TYPE_TIMESTAMP,
             start_index,
             num_queries,
-            destination_buffer.0.as_raw() as *mut _,
+            destination_buffer.com_ptr.as_raw() as *mut _,
             aligned_destination_buffer_offset,
         );
     }
-    pub unsafe fn update_texture2d_using_intermediate_buffer(&self, device: Device, intermediate_buffer: Resource, texture: Resource) {
+    pub unsafe fn update_texture2d_using_intermediate_buffer(
+        &self,
+        device: Device,
+        intermediate_buffer: Resource,
+        texture: Resource,
+    ) {
         let mut src = d3d12::D3D12_TEXTURE_COPY_LOCATION {
-            pResource: intermediate_buffer.0.as_raw(),
+            pResource: intermediate_buffer.com_ptr.as_raw(),
             Type: d3d12::D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
             ..mem::zeroed()
         };
@@ -1129,13 +1169,14 @@ impl GraphicsCommandList {
         *src.u.PlacedFootprint_mut() = layout[0];
 
         let mut dst = d3d12::D3D12_TEXTURE_COPY_LOCATION {
-            pResource: texture.0.as_raw(),
+            pResource: texture.com_ptr.as_raw(),
             Type: d3d12::D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
             ..mem::zeroed()
         };
         *dst.u.SubresourceIndex_mut() = 0;
 
-        self.0.CopyTextureRegion(&dst as *const _, 0, 0, 0, &src as *const _, ptr::null());
+        self.0
+            .CopyTextureRegion(&dst as *const _, 0, 0, 0, &src as *const _, ptr::null());
     }
 }
 
