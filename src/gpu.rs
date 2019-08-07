@@ -1,9 +1,10 @@
 extern crate winapi;
 
 use crate::dx12;
-use crate::glyphs::{load_raw_atlas, RawAtlas};
+use crate::glyphs::{create_atlas, Atlas};
 use crate::scene;
 use crate::window;
+use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::{mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgiformat, dxgitype, minwindef, winerror};
@@ -259,7 +260,7 @@ pub struct GpuState {
     num_tiles_y: u32,
     num_ptcl_tg_x: u32,
     num_ptcl_tg_y: u32,
-    raw_atlas: RawAtlas,
+    atlas: Atlas,
 
     compute_descriptor_heap: dx12::DescriptorHeap,
     constants_buffer: dx12::Resource,
@@ -298,14 +299,17 @@ impl GpuState {
         paint_num_tiles_per_tg_y: u32,
         num_renders: u32,
     ) -> GpuState {
-        let raw_atlas = load_raw_atlas();
+        //        atlas.dump_bytes_as_rgba_image();
+        //        panic!("stop");
 
         let width = wnd.get_width();
         let height = wnd.get_height();
-//        let num_objects = 2;
-//        let (object_size, object_data) = scene::create_constant_scene(width, height);
-        let num_objects = 1000;
-        let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
+
+//        let (num_objects, object_size, object_data, atlas) =
+//            scene::create_constant_scene2(width, height);
+        let (num_objects, object_size, object_data, atlas) =
+            scene::create_text_string_scene(100, 100, "hello!", 50);
+        atlas.dump_bytes_as_rgba_image();
 
         //let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
         //        let num_objects = 1;
@@ -449,7 +453,7 @@ impl GpuState {
             num_tiles_y,
             tile_side_length_in_pixels,
             object_data,
-            raw_atlas.clone(),
+            atlas.clone(),
         );
 
         let (
@@ -506,7 +510,7 @@ impl GpuState {
             num_tiles_y,
             num_ptcl_tg_x,
             num_ptcl_tg_y,
-            raw_atlas,
+            atlas,
 
             compute_descriptor_heap,
             constants_buffer,
@@ -685,7 +689,10 @@ impl GpuState {
 
         let mut rt_descriptor = self
             .rtv_descriptor_heap
-            .get_cpu_descriptor_handle_at_offset(self.frame_index as u32);
+            .get_cpu_descriptor_handle_at_offset(
+                u32::try_from(self.frame_index)
+                    .expect("could not safely convert self.frame_index into u32"),
+            );
         self.command_list.set_render_target(rt_descriptor);
 
         // Record drawing commands.
@@ -745,7 +752,7 @@ impl GpuState {
 
         // we expect texture uploads to be happening every frame
         self.intermediate_texture_upload_buffer
-            .upload_data_to_resource(self.raw_atlas.bytes.len(), self.raw_atlas.bytes.as_ptr());
+            .upload_data_to_resource(self.atlas.bytes.len(), self.atlas.bytes.as_ptr());
 
         self.populate_command_list(render_index);
 
@@ -999,7 +1006,8 @@ impl GpuState {
             constants_buffer.clone(),
             descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(constants_buffer.descriptor_heap_offset),
-            padded_size_in_bytes as u32,
+            u32::try_from(padded_size_in_bytes)
+                .expect("could not safely convert padded_size_in_bytes to u32"),
         );
 
         constants_buffer
@@ -1013,7 +1021,8 @@ impl GpuState {
     ) -> dx12::Resource {
         let object_data_buffer_size_in_bytes = object_data.len();
         let object_data_buffer_size_in_u32s =
-            (object_data_buffer_size_in_bytes / mem::size_of::<u32>()) as u32;
+            u32::try_from((object_data_buffer_size_in_bytes / mem::size_of::<u32>()))
+                .expect("could not safely convert usize into u32");
         let object_data_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -1175,7 +1184,7 @@ impl GpuState {
     }
 
     unsafe fn create_atlas_texture(
-        raw_atlas: RawAtlas,
+        atlas: Atlas,
         device: dx12::Device,
         descriptor_heap: dx12::DescriptorHeap,
         descriptor_heap_offset: u32,
@@ -1191,8 +1200,8 @@ impl GpuState {
         };
         let atlas_resource_description = d3d12::D3D12_RESOURCE_DESC {
             Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-            Width: raw_atlas.width as u64,
-            Height: raw_atlas.height as u32,
+            Width: atlas.width as u64,
+            Height: atlas.height as u32,
             DepthOrArraySize: 1,
             MipLevels: 1,
             SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
@@ -1320,7 +1329,7 @@ impl GpuState {
         num_tiles_y: u32,
         tile_side_length_in_pixels: u32,
         object_data: Vec<u8>,
-        raw_atlas: RawAtlas,
+        atlas: Atlas,
     ) -> (
         dx12::DescriptorHeap,
         dx12::Resource,
@@ -1382,7 +1391,7 @@ impl GpuState {
 
         // create atlas texture
         let atlas_texture = GpuState::create_atlas_texture(
-            raw_atlas.clone(),
+            atlas.clone(),
             device.clone(),
             compute_descriptor_heap.clone(),
             descriptor_heap_offset,
@@ -1404,7 +1413,7 @@ impl GpuState {
             GpuState::create_intermediate_texture_upload_buffer(
                 device.clone(),
                 compute_descriptor_heap.clone(),
-                &raw_atlas.bytes,
+                &atlas.bytes,
                 descriptor_heap_offset,
             );
         descriptor_heap_offset += 1;

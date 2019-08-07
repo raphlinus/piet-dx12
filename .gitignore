@@ -7,3 +7,5 @@
 .vscode
 *.json
 .vs
+
+/resources/raw-atlas-dump.png

@@ -326,11 +326,48 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     }
 
     /**
-    uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_at_object_index(0);
-    uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
-    uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_at_object_index(0);
-    uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
+    uint2 packed_in_atlas_bbox0 = load_packed_in_atlas_bbox_at_object_index(0);
+    uint4 in_atlas_bbox0 = unpack_bbox(packed_in_atlas_bbox0);
+    uint2 packed_in_scene_bbox0 = load_packed_in_scene_bbox_at_object_index(0);
+    uint4 in_scene_bbox0 = unpack_bbox(packed_in_scene_bbox0);
+    bool hit0 = is_pixel_in_bbox(pixel_pos, in_scene_bbox0);
 
+    if (hit0) {
+        fg.r = 1.0;
+        fg.g = 0.0;
+        fg.b = 0.0;
+        fg.a = 1.0;
+    }
+
+    uint2 packed_in_atlas_bbox1 = load_packed_in_atlas_bbox_at_object_index(1);
+    uint4 in_atlas_bbox1 = unpack_bbox(packed_in_atlas_bbox1);
+    uint2 packed_in_scene_bbox1 = load_packed_in_scene_bbox_at_object_index(1);
+    uint4 in_scene_bbox1 = unpack_bbox(packed_in_scene_bbox1);
+    bool hit1 = is_pixel_in_bbox(pixel_pos, in_scene_bbox1);
+
+    if (hit1) {
+        fg.r = 0.0;
+        fg.g = 1.0;
+        fg.b = 0.0;
+        fg.a = 1.0;
+    }
+
+    uint2 packed_in_atlas_bbox2 = load_packed_in_atlas_bbox_at_object_index(2);
+    uint4 in_atlas_bbox2 = unpack_bbox(packed_in_atlas_bbox2);
+    uint2 packed_in_scene_bbox2 = load_packed_in_scene_bbox_at_object_index(2);
+    uint4 in_scene_bbox2 = unpack_bbox(packed_in_scene_bbox2);
+    bool hit2 = is_pixel_in_bbox(pixel_pos, in_scene_bbox2);
+
+    if (hit2) {
+        fg.r = 0.0;
+        fg.g = 0.0;
+        fg.b = 1.0;
+        fg.a = 1.0;
+    }
+    **/
+
+
+    /**
     uint2 rect_origin = {800, 300};
     uint2 rect_size = {50, 10};
     fg.r = 1.0;
@@ -338,18 +375,17 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     fg.b = 1.0;
     fg.a = 0.0;
 
-    uint4 atlas_bbox = {0, 512, 0, 50};
+    uint2 packed_in_atlas_bbox2 = load_packed_in_atlas_bbox_at_object_index(2);
+    uint4 in_atlas_bbox2 = unpack_bbox(packed_in_atlas_bbox2);
+    uint2 packed_in_scene_bbox2 = load_packed_in_scene_bbox_at_object_index(2);
+    uint4 in_scene_bbox2 = unpack_bbox(packed_in_scene_bbox2);
+    bool hit2 = is_pixel_in_bbox(pixel_pos, in_scene_bbox2);
 
-    bool hit = is_pixel_in_bbox(pixel_pos, atlas_bbox);
-    if (hit) {
-        //uint2 atlas_pixel_pos = {pixel_pos.x - in_scene_bbox[0], pixel_pos.y - in_scene_bbox[2]};
-        fg.a = glyph_atlas[pixel_pos];
-    }
-
-    // fg.a = number_shader(in_atlas_bbox[1], pixel_pos, rect_origin, rect_size);
+    fg.a = number_shader(in_scene_bbox2[0], pixel_pos, rect_origin, rect_size);
 
     bg = blend_pd_over(bg, fg);
     **/
+
     /**
     if (scene_bbox_hit) {
         fg.r = 1.0;

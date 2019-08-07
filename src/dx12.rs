@@ -4,6 +4,7 @@ extern crate wio;
 use self::winapi::um::d3dcommon::ID3DBlob;
 use crate::error;
 use crate::error::error_if_failed_else_unit;
+use std::convert::TryFrom;
 use std::os::windows::ffi::OsStrExt;
 use std::{ffi, mem, path::Path, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
@@ -774,7 +775,8 @@ impl Device {
         self.0.GetCopyableFootprints(
             &desc as *const _,
             first_subresource,
-            num_subresources as u32,
+            u32::try_from(num_subresources)
+                .expect("could not safely convert num_subresources into u32"),
             base_offset,
             layouts.as_mut_ptr(),
             num_rows.as_mut_ptr(),
@@ -1010,7 +1012,8 @@ impl GraphicsCommandList {
         resource_barriers: Vec<d3d12::D3D12_RESOURCE_BARRIER>,
     ) {
         self.0.ResourceBarrier(
-            resource_barriers.len() as u32,
+            u32::try_from(resource_barriers.len())
+                .expect("could not safely convert resource_barriers.len() into u32"),
             (&resource_barriers).as_ptr(),
         );
     }
@@ -1124,7 +1127,8 @@ impl GraphicsCommandList {
         let descriptor_heap_pointers: Vec<*mut d3d12::ID3D12DescriptorHeap> =
             descriptor_heaps.iter().map(|dh| dh.heap.as_raw()).collect();
         self.0.SetDescriptorHeaps(
-            descriptor_heap_pointers.len() as u32,
+            u32::try_from(descriptor_heap_pointers.len())
+                .expect("could not safely convert descriptor_heap_pointers.len() into u32"),
             (&descriptor_heap_pointers).as_ptr() as *mut _,
         );
     }
