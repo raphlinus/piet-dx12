@@ -260,7 +260,8 @@ pub unsafe fn create_constant_scene(
 
     let x_cursor = 500;
     let gix = atlas.get_glyph_index_of_char('0');
-    let in_atlas_bbox = atlas.glyph_bboxes[gix];
+    let in_atlas_bbox =
+        atlas.glyph_bboxes[gix].expect("constant scene: character does not have a bbox");
     let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
         .expect("could not safely convert u32 glyph advance into u16");
     object_size = append_glyph2(
@@ -305,7 +306,8 @@ pub unsafe fn create_constant_scene2(
     let mut x_cursor = 500;
 
     let gix = atlas.get_glyph_index_of_char('0');
-    let in_atlas_bbox = atlas.glyph_bboxes[gix];
+    let in_atlas_bbox =
+        atlas.glyph_bboxes[gix].expect("constant scene: character does not have a bbox");
     let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
         .expect("could not safely convert u32 glyph advance into u16");
     object_size = append_glyph2(
@@ -320,7 +322,8 @@ pub unsafe fn create_constant_scene2(
     num_objects += 1;
 
     let gix = atlas.get_glyph_index_of_char('1');
-    let in_atlas_bbox = atlas.glyph_bboxes[gix];
+    let in_atlas_bbox =
+        atlas.glyph_bboxes[gix].expect("constant scene: character does not have a bbox");
     let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
         .expect("could not safely convert u32 glyph advance into u16");
     object_size = append_glyph2(
@@ -361,27 +364,38 @@ pub unsafe fn create_text_string_scene(
         result
     };
 
-    let atlas = create_atlas(glyph_chars, font_size, 512, 50);
+    let atlas = create_atlas(glyph_chars, font_size, 512, 512);
 
     let mut object_data: Vec<u8> = Vec::new();
     let mut object_size: u32 = 24;
 
     let mut x_cursor: u16 = screen_x_offset;
+    let screen_y_offset_i32 = screen_y_offset as i32;
     let mut num_objects: u32 = 0;
     for (i, &c) in string_chars.iter().enumerate() {
         let gix = atlas.get_glyph_index_of_char(c);
-        let in_atlas_bbox = atlas.glyph_bboxes[gix];
+        let some_in_atlas_bbox = atlas.glyph_bboxes[gix];
         let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
             .expect("could not safely convert u32 glyph advance into u16");
-        object_size = append_glyph2(
-            &mut object_data,
-            gix as u16,
-            in_atlas_bbox,
-            x_cursor,
-            screen_y_offset,
-            [255, 255, 255, 255],
-        );
-        x_cursor += (in_atlas_bbox.1 - in_atlas_bbox.0) + glyph_advance;
+        let y_offset = u16::try_from(screen_y_offset_i32 + atlas.glyph_top_offsets[gix])
+            .expect("could not safely convert i32 glyph y offset into u16");
+
+        match some_in_atlas_bbox {
+            Some(in_atlas_bbox) => {
+                object_size = append_glyph2(
+                    &mut object_data,
+                    gix as u16,
+                    in_atlas_bbox,
+                    x_cursor,
+                    y_offset,
+                    [255, 255, 255, 255],
+                );
+                x_cursor += (in_atlas_bbox.1 - in_atlas_bbox.0) + (0.2 * glyph_advance as f32).round() as u16;
+            }
+            None => {
+                x_cursor += glyph_advance;
+            }
+        }
         num_objects += 1;
     }
 

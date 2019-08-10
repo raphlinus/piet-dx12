@@ -305,10 +305,10 @@ impl GpuState {
         let width = wnd.get_width();
         let height = wnd.get_height();
 
-//        let (num_objects, object_size, object_data, atlas) =
-//            scene::create_constant_scene2(width, height);
+        //        let (num_objects, object_size, object_data, atlas) =
+        //            scene::create_constant_scene2(width, height);
         let (num_objects, object_size, object_data, atlas) =
-            scene::create_text_string_scene(100, 100, "hello!", 50);
+            scene::create_text_string_scene(100, 100, "hello world!", 50);
         atlas.dump_bytes_as_rgba_image();
 
         //let (object_size, object_data) = scene::create_random_scene(width, height, num_objects);
