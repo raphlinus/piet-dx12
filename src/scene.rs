@@ -1,5 +1,8 @@
 extern crate byteorder;
 extern crate rand;
+extern crate kurbo;
+
+use kurbo::{Shape, Circle, Rect, Point};
 
 use crate::glyphs::{create_atlas, Atlas};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -7,337 +10,185 @@ use rand::Rng;
 use std::convert::TryFrom;
 use std::io::Cursor;
 
-// HLSL weirdness: bytes 0 1 2 3 will be mapped to 3 2 1 0
-
-pub unsafe fn append_circle(
-    object_data: &mut Vec<u8>,
-    scene_bbox_x_min: u16,
-    scene_bbox_y_min: u16,
-    diameter: u16,
-    color: [u8; 4],
-) {
-    // glyph_id
-    object_data
-        .write_u16::<LittleEndian>(0)
-        .expect("could not convert u16 to bytes");
-    // object_type
-    object_data
-        .write_u16::<LittleEndian>(0)
-        .expect("could not convert u16 to bytes");
-
-    // atlas_bbox_x_max
-    object_data
-        .write_u16::<LittleEndian>(0)
-        .expect("could not convert u16 to bytes");
-    // atlas_bbox_x_min
-    object_data
-        .write_u16::<LittleEndian>(0)
-        .expect("could not convert u16 to bytes");
-
-    // atlas_bbox_y_max
-    object_data
-        .write_u16::<LittleEndian>(0)
-        .expect("could not convert u16 to bytes");
-    // atlas_bbox_y_min
-    object_data
-        .write_u16::<LittleEndian>(0)
-        .expect("could not convert u16 to bytes");
-
-    // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_x_min + diameter)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_x_min)
-        .expect("could not convert u16 to bytes");
-
-    // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_y_min + diameter)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_y_min)
-        .expect("could not convert u16 to bytes");
-
-    for component in color.iter() {
-        object_data.push(*component);
-    }
+pub enum ObjectType {
+    Circle,
+    Glyph,
 }
 
-pub unsafe fn append_glyph(
-    object_data: &mut Vec<u8>,
+pub struct GenericObject {
+    object_type: u16,
     glyph_id: u16,
-    scene_bbox_x_min: u16,
-    scene_bbox_y_min: u16,
-    width: u16,
-    height: u16,
+    in_atlas_bbox: (u16, u16, u16, u16),
+    in_scene_bbox: (u16, u16, u16, u16),
     color: [u8; 4],
-) {
-    object_data
-        .write_u16::<LittleEndian>(glyph_id)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(1)
-        .expect("could not convert u16 to bytes");
-
-    let atlas_bbox_x_min = glyph_id * 50;
-    let atlas_bbox_y_min: u16 = 0;
-
-    object_data
-        .write_u16::<LittleEndian>(atlas_bbox_x_min + width)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(atlas_bbox_x_min)
-        .expect("could not convert u16 to bytes");
-
-    object_data
-        .write_u16::<LittleEndian>(atlas_bbox_y_min + height)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(atlas_bbox_y_min)
-        .expect("could not convert u16 to bytes");
-
-    // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_x_min + width)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_x_min)
-        .expect("could not convert u16 to bytes");
-
-    // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_y_min + height)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_y_min)
-        .expect("could not convert u16 to bytes");
-
-    for component in color.iter() {
-        object_data.push(*component);
-    }
+}
+pub struct Scene {
+    objects: Vec<GenericObject>,
 }
 
-pub unsafe fn append_glyph2(
-    object_data: &mut Vec<u8>,
-    glyph_id: u16,
-    in_atlas_glyph_bbox: (u16, u16, u16, u16),
-    scene_bbox_x_min: u16,
-    scene_bbox_y_min: u16,
-    color: [u8; 4],
-) -> u32 {
-    let mut object_size = 0;
-
-    object_data
-        .write_u16::<LittleEndian>(glyph_id)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(1)
-        .expect("could not convert u16 to bytes");
-    object_size += 4;
-
-    let (width, height) = {
-        (
-            in_atlas_glyph_bbox.1 - in_atlas_glyph_bbox.0,
-            in_atlas_glyph_bbox.3 - in_atlas_glyph_bbox.2,
-        )
-    };
-
-    object_data
-        .write_u16::<LittleEndian>(in_atlas_glyph_bbox.1)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(in_atlas_glyph_bbox.0)
-        .expect("could not convert u16 to bytes");
-    object_size += 4;
-
-    object_data
-        .write_u16::<LittleEndian>(in_atlas_glyph_bbox.3)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(in_atlas_glyph_bbox.2)
-        .expect("could not convert u16 to bytes");
-    object_size += 4;
-
-    // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_x_min + width)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_x_min)
-        .expect("could not convert u16 to bytes");
-    object_size += 4;
-
-    // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_y_min + height)
-        .expect("could not convert u16 to bytes");
-    object_data
-        .write_u16::<LittleEndian>(scene_bbox_y_min)
-        .expect("could not convert u16 to bytes");
-    object_size += 4;
-
-    for component in color.iter() {
-        object_data.push(*component);
+impl Scene {
+    pub fn empty_new() -> Scene {
+        Scene {
+            objects: Vec::new(),
+        }
     }
-    object_size += 4;
 
-    object_size
-}
+    pub unsafe fn to_bytes(&self) -> Vec<u8> {
+        let mut scene_in_bytes = Vec::<u8>::new();
 
-pub unsafe fn create_random_scene(
-    screen_width: u32,
-    screen_height: u32,
-    num_objects: u32,
-) -> (u32, Vec<u8>) {
-    let mut rng = rand::thread_rng();
+        for object in self.objects {
+            // glyph_id
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.glyph_id)
+                .expect("could not convert u16 to bytes");
+            // object_type
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.object_type as u16)
+                .expect("could not convert u16 to bytes");
 
-    let mut object_data: Vec<u8> = Vec::new();
-    let object_size = 24;
+            // atlas_bbox_x_max
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_atlas_bbox.1)
+                .expect("could not convert u16 to bytes");
+            // atlas_bbox_x_min
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_atlas_bbox.0)
+                .expect("could not convert u16 to bytes");
 
-    for n in 0..num_objects {
-        let object_type: u16 = rng.gen_range(0, 2);
-        let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (
-            rng.gen_range(0, screen_width) as u16,
-            rng.gen_range(0, screen_height) as u16,
+            // atlas_bbox_y_max
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_atlas_bbox.3)
+                .expect("could not convert u16 to bytes");
+            // atlas_bbox_y_min
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_atlas_bbox.2)
+                .expect("could not convert u16 to bytes");
+
+            // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.1)
+                .expect("could not convert u16 to bytes");
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.0)
+                .expect("could not convert u16 to bytes");
+
+            // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.3)
+                .expect("could not convert u16 to bytes");
+            scene_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.2)
+                .expect("could not convert u16 to bytes");
+
+            for component in color.iter().rev() {
+                scene_in_bytes.push(*component);
+            }
+        }
+
+        scene_in_bytes
+    }
+    pub unsafe fn append_circle(&mut self, circle: Circle, color: [u8; 4]) {
+        self.objects.push(
+            GenericObject {
+                object_type: ObjectType::Circle as u16,
+                glyph_id: 0,
+                in_atlas_bbox: (0, 0, 0, 0),
+                in_scene_bbox: (u16::try_from(circle.center.0 - circle.radius).expect("could not convert circle bbox x_min to u16"),
+                                u16::try_from(circle.center.0 + circle.radius).expect("could not convert circle bbox x_max to u16"),
+                                u16::try_from(circle.center.1 - circle.radius).expect("could not convert circle bbox y_min to u16"),
+                                u16::try_from(circle.center.1 + circle.radius).expect("could not convert circle bbox y_max to u16")),
+                color,
+            }
         );
-        let mut color: [u8; 4] = [0; 4];
-        for i in 0..4 {
-            color[i] = rng.gen_range(0, 256) as u8;
-        }
+    }
 
-        if object_type == 0 {
-            let diameter: u16 = rng.gen_range(20, 200);
-            append_circle(
-                &mut object_data,
-                scene_bbox_x_min,
-                scene_bbox_y_min,
-                diameter,
-                color,
-            );
-        } else {
-            let glyph_id: u16 = rng.gen_range(0, 10);
-            append_glyph(
-                &mut object_data,
+    pub unsafe fn append_glyph(
+        &mut self,
+        glyph_id: u16,
+        in_atlas_bbox: Rect,
+        in_scene_bbox: Rect,
+        color: [u8; 4],
+    ) {
+        self.objects.push(
+            GenericObject {
+                object_type: ObjectType::Glyph as u16,
                 glyph_id,
-                scene_bbox_x_min,
-                scene_bbox_y_min,
-                50,
-                50,
+                in_atlas_bbox: (u16::try_from(in_atlas_bbox.x0).expect("could not convert glyph's in atlas bbox x_min to u16"),
+                                u16::try_from(in_atlas_bbox.x1).expect("could not convert glyph's in atlas bbox x_max to u16"),
+                                u16::try_from(in_atlas_bbox.y0).expect("could not convert glyph's in atlas bbox y_min to u16"),
+                                u16::try_from(in_atlas_bbox.y1).expect("could not convert glyph's in atlas bbox y_max to u16")),
+                in_scene_bbox: (u16::try_from(in_scene_bbox.x0).expect("could not convert glyph's in scene bbox x_min to u16"),
+                                u16::try_from(in_scene_bbox.x1).expect("could not convert glyph's in scene bbox x_max to u16"),
+                                u16::try_from(in_scene_bbox.y0).expect("could not convert glyph's in scene bbox y_min to u16"),
+                                u16::try_from(in_scene_bbox.y1).expect("could not convert glyph's in scene bbox y_max to u16")),
                 color,
+            }
+        );
+    }
+
+    pub unsafe fn populate_randomly(
+        &mut self,
+        screen_width: u32,
+        screen_height: u32,
+        num_objects: u32,
+        glyph_atlas: Atlas,
+    ) {
+        let mut rng = rand::thread_rng();
+
+        let mut object_data: Vec<u8> = Vec::new();
+        let object_size = 24;
+
+        for n in 0..num_objects {
+            let object_type: u16 = rng.gen_range(0, 2);
+            let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (
+                rng.gen_range(0, screen_width) as u16,
+                rng.gen_range(0, screen_height) as u16,
             );
+
+            let mut color: [u8; 4] = [0; 4];
+            for i in 0..4 {
+                color[i] = rng.gen_range(0, 256) as u8;
+            }
+
+            if object_type == 0 {
+                let radius: f64 = rng.gen_range(10.0, 100.0);
+                self.append_circle(
+                    Circle {
+                        center: Point {
+                            x: radius + (scene_bbox_x_min as f64),
+                            y: radius + (scene_bbox_y_min as f64),
+                        },
+                        radius,
+                    },
+                    color,
+                );
+            } else {
+                let glyph_ix: u16 = rng.gen_range(0, glyph_atlas.glyph_bboxes.len());
+                let glyph_bbox = glyph_atlas.glyph_bboxes[glyph_ix];
+
+                self.append_glyph(
+                    glyph_ix,
+                    Rect {
+                        x0: glyph_atlas.glyph_bboxes[glyph_ix].0 as f64,
+                        x1: glyph_atlas.glyph_bboxes[glyph_ix].1 as f64,
+                        y0: glyph_atlas.glyph_bboxes[glyph_ix].2 as f64,
+                        y1: glyph_atlas.glyph_bboxes[glyph_ix].3 as f64,
+                    },
+                    Rect {
+                        x0: scene_bbox_x_min as f64,
+                        x1: (glyph_atlas.glyph_bboxes[glyph_ix].1 - glyph_atlas.glyph_bboxes[glyph_ix].0) as f64,
+                        y0: scene_bbox_y_min as f64,
+                        y1: (glyph_atlas.glyph_bboxes[glyph_ix].3 -  glyph_atlas.glyph_bboxes[glyph_ix].2) as f64,
+                    },
+                    color,
+                );
+            }
         }
     }
 
-    (object_size, object_data)
-}
+    pub unsafe fn add_text(&mut self, screen_x_offset: u16, screen_y_offset: u16, text_string: &str, font_size: u32) {
 
-pub unsafe fn create_constant_scene(
-    screen_width: u32,
-    screen_height: u32,
-) -> (u32, u32, Vec<u8>, Atlas) {
-    let atlas = create_atlas(vec!['0', '1'], 50, 512, 50);
-
-    let mut rng = rand::thread_rng();
-
-    let mut object_data: Vec<u8> = Vec::new();
-    let object_size = 24;
-
-    let diameter: u16 = 200;
-    let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (100, 100);
-    let color: [u8; 4] = [255, 255, 255, 255];
-    let mut num_objects: u32 = 0;
-    let mut object_size: u32 = 0;
-
-    append_circle(
-        &mut object_data,
-        scene_bbox_x_min,
-        scene_bbox_y_min,
-        diameter,
-        color,
-    );
-    num_objects += 1;
-
-    let x_cursor = 500;
-    let gix = atlas.get_glyph_index_of_char('0');
-    let in_atlas_bbox =
-        atlas.glyph_bboxes[gix].expect("constant scene: character does not have a bbox");
-    let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
-        .expect("could not safely convert u32 glyph advance into u16");
-    object_size = append_glyph2(
-        &mut object_data,
-        gix as u16,
-        in_atlas_bbox,
-        x_cursor,
-        scene_bbox_y_min,
-        [255, 255, 255, 255],
-    );
-    num_objects += 1;
-
-    (num_objects, object_size, object_data, atlas)
-}
-
-pub unsafe fn create_constant_scene2(
-    screen_width: u32,
-    screen_height: u32,
-) -> (u32, u32, Vec<u8>, Atlas) {
-    let atlas = create_atlas(vec!['0', '1'], 50, 512, 50);
-
-    let mut rng = rand::thread_rng();
-
-    let mut object_data: Vec<u8> = Vec::new();
-    let object_size = 24;
-
-    let diameter: u16 = 200;
-    let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (100, 100);
-    let color: [u8; 4] = [255, 255, 255, 255];
-    let mut num_objects: u32 = 0;
-    let mut object_size: u32 = 0;
-
-    append_circle(
-        &mut object_data,
-        scene_bbox_x_min,
-        scene_bbox_y_min,
-        diameter,
-        color,
-    );
-    num_objects += 1;
-
-    let mut x_cursor = 500;
-
-    let gix = atlas.get_glyph_index_of_char('0');
-    let in_atlas_bbox =
-        atlas.glyph_bboxes[gix].expect("constant scene: character does not have a bbox");
-    let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
-        .expect("could not safely convert u32 glyph advance into u16");
-    object_size = append_glyph2(
-        &mut object_data,
-        gix as u16,
-        in_atlas_bbox,
-        x_cursor,
-        scene_bbox_y_min,
-        [255, 255, 255, 255],
-    );
-    x_cursor += (in_atlas_bbox.1 - in_atlas_bbox.0) + glyph_advance;
-    num_objects += 1;
-
-    let gix = atlas.get_glyph_index_of_char('1');
-    let in_atlas_bbox =
-        atlas.glyph_bboxes[gix].expect("constant scene: character does not have a bbox");
-    let glyph_advance = u16::try_from(atlas.glyph_advances[gix])
-        .expect("could not safely convert u32 glyph advance into u16");
-    object_size = append_glyph2(
-        &mut object_data,
-        gix as u16,
-        in_atlas_bbox,
-        x_cursor,
-        scene_bbox_y_min,
-        [255, 255, 255, 255],
-    );
-    x_cursor += (in_atlas_bbox.1 - in_atlas_bbox.0) + glyph_advance;
-    num_objects += 1;
-
-    (num_objects, object_size, object_data, atlas)
+    }
 }
 
 use std::collections::HashSet;
