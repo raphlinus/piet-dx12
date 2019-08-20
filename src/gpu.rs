@@ -1028,7 +1028,7 @@ impl GpuState {
                 let s = size_of_u32 as f64;
                 let o = object_data_buffer_size_in_bytes as f64;
 
-                (s/o).ceil() as u32
+                (o/s).ceil() as u32
 
             };
 
@@ -1065,8 +1065,6 @@ impl GpuState {
             descriptor_heap_offset,
         );
         println!("creating object data buffer...");
-        let object_data: [u8; 24] = [100; 24];
-        object_data_buffer.upload_data_to_resource(object_data.len(), object_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             object_data_buffer.clone(),
             descriptor_heap

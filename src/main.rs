@@ -242,17 +242,15 @@ fn main() {
         let atlas_height: u16 = 512;
 
         let mut render_context = DX12RenderContext::new(atlas_width, atlas_height);
-        //let custom_font = atlas::FontBytes::new();
-        //let font_rs_obj = custom_font.generate_font_rs_object();
-        //render_context.scene.add_characters_to_atlas("0123456789", 50, &font_rs_obj);
+        let custom_font = atlas::FontBytes::new();
+        let font_rs_obj = custom_font.generate_font_rs_object();
+        render_context.scene.add_characters_to_atlas("0123456789", 50, &font_rs_obj);
         //render_context.scene.atlas.dump_bytes_as_rgba_image();
-        //render_context.scene.populate_randomly(wnd.get_width(), wnd.get_height(), num_objects);
-        render_context.scene.initialize_test_scene0(wnd.get_width(), wnd.get_height());
+        render_context.scene.populate_randomly(wnd.get_width(), wnd.get_height(), 1000);
+        //render_context.scene.initialize_test_scene0(wnd.get_width(), wnd.get_height());
         let tile_side_length_in_pixels = 16;
 
         let num_objects: u32 = render_context.scene.objects.len() as u32;
-        println!("num_objects: {}", num_objects);
-        println!("scene in bytes: {:?}", render_context.scene.to_bytes());
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
@@ -280,9 +278,7 @@ fn main() {
             num_tiles_y: gpu_state.num_tiles_y,
         };
 
-        gpu_state.upload_data(Some(constants), None, None);
-
-        //panic!("stop");
+        gpu_state.upload_data(Some(constants), Some(render_context.scene.to_bytes()), Some(&render_context.scene.atlas.bytes));
 
         for i in 0..num_renders {
             gpu_state.render(i, &render_context.scene.atlas.bytes);
