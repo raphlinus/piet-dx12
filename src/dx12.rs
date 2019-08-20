@@ -5,7 +5,6 @@ use self::winapi::um::d3dcommon::ID3DBlob;
 use crate::error;
 use crate::error::error_if_failed_else_unit;
 use std::convert::TryFrom;
-use std::os::windows::ffi::OsStrExt;
 use std::{ffi, mem, path::Path, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, d3dcompiler, dxgidebug, synchapi, winnt};
@@ -150,12 +149,6 @@ impl Resource {
 impl Factory4 {
     pub unsafe fn create(flags: minwindef::UINT) -> Factory4 {
         let mut factory = ptr::null_mut();
-
-        #[cfg(debug_assertions)]
-        let flags = dxgi1_3::DXGI_CREATE_FACTORY_DEBUG;
-
-        #[cfg(not(debug_assertions))]
-        let flags: u32 = 0;
 
         error::error_if_failed_else_unit(dxgi1_3::CreateDXGIFactory2(
             flags,
@@ -564,7 +557,7 @@ impl Device {
         descriptor: CpuDescriptor,
         size_in_bytes: u32,
     ) {
-        let mut cbv_desc = d3d12::D3D12_CONSTANT_BUFFER_VIEW_DESC {
+        let cbv_desc = d3d12::D3D12_CONSTANT_BUFFER_VIEW_DESC {
             BufferLocation: resource.get_gpu_virtual_address(),
             SizeInBytes: size_in_bytes,
         };
@@ -926,7 +919,7 @@ impl ShaderByteCode {
 
         #[cfg(debug_assertions)]
         {
-            if (!error_blob_ptr.is_null()) {
+            if !error_blob_ptr.is_null() {
                 let error_blob = Blob(ComPtr::from_raw(error_blob_ptr));
                 Blob::print_to_console(error_blob.clone());
             }

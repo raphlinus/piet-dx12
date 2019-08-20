@@ -9,7 +9,7 @@ extern crate kurbo;
 
 pub mod dx12;
 pub mod error;
-pub mod glyphs;
+pub mod atlas;
 pub mod gpu;
 pub mod scene;
 pub mod window;
@@ -18,59 +18,64 @@ use std::os::windows::ffi::OsStrExt;
 
 use std::borrow::Cow;
 
-use kurbo::{Affine, Point, Rect, Shape, Circle};
+use kurbo::{Affine, Point, Rect, Shape};
 
 use piet::{
     Color, Error, FixedGradient, Font, FontBuilder, ImageFormat, InterpolationMode, IntoBrush,
     RenderContext, StrokeStyle, Text, TextLayout, TextLayoutBuilder,
 };
 
-pub struct DX12RenderContext {
-    num_renders: u32,
-    gpu_state: gpu::GpuState,
-    text: DX12Text,
-
-}
-
+#[derive(Clone)]
 pub struct ColorValue {
     color_u32: u32,
     color_u8s: [u8; 4],
 }
 
+#[derive(Clone)]
 pub enum DX12Brush {
-    Solid(ColorValue)
+    Solid(ColorValue),
+    Gradient,
 }
 
 pub struct DX12Image;
-
-pub struct DX12Text{
-    num_objects: u32,
-    object_size: u32,
-    object_data: Vec<u8>,
-    atlas: crate::glyphs::Atlas,
-}
-
 pub struct DX12Font;
 pub struct DX12FontBuilder;
 
 pub struct DX12TextLayout;
 pub struct DX12TextLayoutBuilder;
 
+pub struct DX12Text;
+
+
+// let mut gpu_state = gpu::GpuState::new(
+//            wnd,
+//            String::from("build_per_tile_command_list"),
+//            String::from("paint_objects"),
+//            String::from("VSMain"),
+//            String::from("PSMain"),
+//            1000,
+//            16,
+//            32,
+//            1,
+//            1,
+//            1,
+//            512,
+//            512,
+//            512*512,
+//            1000,
+//        );
+
+pub struct DX12RenderContext {
+    scene: scene::Scene,
+    text: DX12Text,
+}
+
 impl DX12RenderContext {
-    pub unsafe fn new(wnd: &window::Window) -> DX12RenderContext {
-        let mut gpu_state = gpu::GpuState::new(
-            wnd,
-            String::from("build_per_tile_command_list"),
-            String::from("paint_objects"),
-            String::from("VSMain"),
-            String::from("PSMain"),
-            16,
-            32,
-            1,
-            1,
-            1,
-            num_renders,
-        );
+    pub unsafe fn new() -> DX12RenderContext {
+        DX12RenderContext {
+            scene: scene::Scene::new_empty(),
+            text: DX12Text,
+        }
     }
 }
 
@@ -101,14 +106,12 @@ impl RenderContext for DX12RenderContext {
     }
 
     fn gradient(&mut self, _gradient: impl Into<FixedGradient>) -> Result<Self::Brush, Error> {
-        Ok(Self::Brush {
-            color: [0, 0, 0, 0],
-        })
+        Ok(Self::Brush::Gradient)
     }
 
-    fn clear(&mut self, color: Color) {}
+    fn clear(&mut self, _color: Color) {}
 
-    fn stroke(&mut self, _shape: impl Shape, brush: &impl IntoBrush<Self>, _width: f64) {}
+    fn stroke(&mut self, _shape: impl Shape, _brush: &impl IntoBrush<Self>, _width: f64) {}
 
     fn stroke_styled(
         &mut self,
@@ -119,7 +122,7 @@ impl RenderContext for DX12RenderContext {
     ) {
     }
 
-    fn fill(&mut self, shape: impl Shape, brush: &impl IntoBrush<Self>) {
+    fn fill(&mut self, _shape: impl Shape, _brush: &impl IntoBrush<Self>) {
 
     }
 
@@ -128,7 +131,7 @@ impl RenderContext for DX12RenderContext {
     fn clip(&mut self, _shape: impl Shape) {}
 
     fn text(&mut self) -> &mut Self::Text {
-        &mut self.0
+        &mut self.text
     }
 
     fn draw_text(
@@ -232,7 +235,7 @@ pub fn win32_string(value: &str) -> Vec<u16> {
 fn main() {
     unsafe {
         println!("creating window...");
-        let mut wnd = window::Window::new(win32_string("test"), win32_string("test"));
+        let wnd = window::Window::new(win32_string("test"), win32_string("test"));
 
         let num_renders: u32 = 1000;
         let mut gpu_state = gpu::GpuState::new(
@@ -241,16 +244,22 @@ fn main() {
             String::from("paint_objects"),
             String::from("VSMain"),
             String::from("PSMain"),
+            1000,
             16,
             32,
             1,
             1,
             1,
-            num_renders,
+            512,
+            512,
+            512*512,
+            1000,
         );
 
+        let render_context = DX12RenderContext::new();
+
         for i in 0..num_renders {
-            gpu_state.render(i);
+            gpu_state.render(i, &render_context.scene.atlas.bytes);
         }
 
         gpu_state.print_stats();

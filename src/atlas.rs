@@ -1,17 +1,15 @@
 extern crate font_rs;
 extern crate image;
-
-use self::image::GenericImageView;
 use crate::dx12;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fs::File;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::PathBuf;
 
-use font_rs::font::{parse, Font, GlyphBitmap, VMetrics};
+use font_rs::font::{parse, Font};
 
 #[derive(Clone, Copy)]
 pub struct AtlasCursor {
@@ -32,12 +30,15 @@ impl fmt::Display for AtlasCursor {
 
 #[derive(Clone)]
 pub struct Atlas {
+    pub glyph_count: usize,
     pub bytes: Vec<u8>,
     pub width: u16,
+    row_stride: usize,
     pub height: u16,
     pub glyph_bboxes: Vec<Option<(u16, u16, u16, u16)>>,
     cursor: u16,
-    char_to_ix_map: HashMap<char, usize>,
+    //TODO: distinguish by character, font size, and font; not just character and font size!
+    char_to_ix_map: HashMap<(char, u32), usize>,
     pub glyph_advances: Vec<u32>,
     pub glyph_top_offsets: Vec<i32>,
     pub strip_free_lists: Vec<Vec<AtlasCursor>>,
@@ -74,94 +75,108 @@ impl fmt::Display for AllocationError {
 }
 
 impl Atlas {
-    pub fn generate_atlas(
-        atlas_width: u16,
-        atlas_height: u16,
-        glyph_chars: Vec<char>,
-        glyph_ids: Vec<u16>,
-        glyph_bitmaps: Vec<Option<GlyphBitmap>>,
-        glyph_advances: Vec<u32>,
-        glyph_top_offsets: Vec<i32>,
-    ) -> Atlas {
-        let mut char_to_ix_map = HashMap::new();
-
-        for (i, &c) in glyph_chars.iter().enumerate() {
-            char_to_ix_map.insert(c, i);
-        }
-
+    pub fn create_empty_atlas(atlas_width: u16, atlas_height: u16) -> Atlas {
         let free_list: Vec<Vec<AtlasCursor>> = (0..16).map(|_| Vec::<AtlasCursor>::new()).collect();
+        let row_stride = (atlas_width as usize) * std::mem::size_of::<u8>();
 
-        let mut atlas = Atlas {
+        Atlas {
+            glyph_count: 0,
             bytes: vec![
                 0;
                 (atlas_width as usize) * (atlas_height as usize) * std::mem::size_of::<u8>()
             ],
             width: atlas_width,
+            row_stride,
             height: atlas_height,
             glyph_bboxes: Vec::new(),
             cursor: 0,
-            char_to_ix_map,
-            glyph_advances,
-            glyph_top_offsets,
+            char_to_ix_map: HashMap::new(),
+            glyph_advances: Vec::<u32>::new(),
+            glyph_top_offsets: Vec::<i32>::new(),
             strip_free_lists: free_list,
+        }
+    }
+
+    pub fn insert_character(&mut self, c: char, font_size: u32, font: &Font) {
+        //TODO: distinguish by character, font size, and font; not just character and font size!
+        if self.char_to_ix_map.contains_key(&(c, font_size)) {
+            return;
+        }
+
+        let glyph_code_point = c as u32;
+        let glyph_id = font.lookup_glyph_id(glyph_code_point).expect(&format!("error looking up glyph id of character: {}", c));
+
+        let glyph_advance = font.get_h_metrics(glyph_id, font_size)
+            .expect(&format!(
+                "could not retrieve h metrics for glyph '{}' in font",
+                c
+            ))
+            .advance_width
+            .round() as u32;
+
+        let glyph_bitmap = font.render_glyph(glyph_id, font_size);
+        let glyph_top_offset = match &glyph_bitmap {
+            Some(gb) => gb.top,
+            None => 0,
         };
 
-        let glyph_bboxes: Vec<Option<(u16, u16, u16, u16)>> = {
-            glyph_chars.iter().zip(&glyph_bitmaps)
-                .map(|(&gc, ogb)| {
-                    match ogb {
-                        Some(gb) => {
-                            let gw = u16::try_from(gb.width)
-                                .expect("could not safely convert glyph bitmap width to u16");
-                            let gh = u16::try_from(gb.height)
-                                .expect("could not safely convert glyph bitmap width to u16");
-                            println!("atlas: allocating space for glyph of character '{}'", gc);
-                            let tl = match atlas.allocate_rect(gw, gh) {
-                                Ok(result) => {
-                                    result
-                                },
-                                Err(err) => {
-                                    panic!("atlas: could not allocate space for glyph of character '{}', with size ({}, {}), error: {}", gc, gw, gh, err);
-                                }
-                            };
+        self.char_to_ix_map.insert((c, font_size), self.glyph_count);
+        self.glyph_count += 1;
 
-                            let bbox = (tl.0, tl.0 + gw, tl.1, tl.1 + gh);
-                            println!("new glyph bbox: {}, {}, {}, {}", bbox.0, bbox.1, bbox.2, bbox.3);
-                            Some(bbox)
-                        },
-                        None => {
-                            None
-                        }
+        let in_atlas_bbox = match &glyph_bitmap {
+            Some(gb) => {
+                let gw = u16::try_from(gb.width)
+                    .expect("could not safely convert glyph bitmap width to u16");
+                let gh = u16::try_from(gb.height)
+                    .expect("could not safely convert glyph bitmap width to u16");
+                // println!("atlas: allocating space for glyph of character '{}'", gc);
+                let tl = match self.allocate_rect(gw, gh) {
+                    Ok(result) => {
+                        result
+                    },
+                    Err(err) => {
+                        panic!("atlas: could not allocate space for glyph of character '{}', with size ({}, {}), error: {}", c, gw, gh, err);
                     }
-                })
-                .collect()
-        };
-        atlas.glyph_bboxes = glyph_bboxes;
+                };
 
-        let atlas_row_stride = (atlas.width as usize) * std::mem::size_of::<u8>();
+                let gbbox = (tl.0, tl.0 + gw, tl.1, tl.1 + gh);
+                // println!("new glyph bbox: {}, {}, {}, {}", gbbox.0, gbbox.1, gbbox.2, gbbox.3);
 
-        for i in 0..glyph_chars.len() {
-            match &glyph_bitmaps[i] {
-                Some(gb) => {
-                    let gbbox = atlas.glyph_bboxes[i].expect(&format!(
-                        "glyph bitmap exists, but not bbox, for character: {}",
-                        glyph_chars[i]
-                    ));
+                let glyph_row_stride = gb.width * std::mem::size_of::<u8>();
 
-                    let glyph_row_stride = gb.width * std::mem::size_of::<u8>();
-
-                    let x_offset_in_atlas = (gbbox.0 as usize) * std::mem::size_of::<u8>();
-                    for hix in 0..gb.height {
-                        let start_address =
-                            x_offset_in_atlas + (hix + (gbbox.2 as usize)) * atlas_row_stride;
-                        for ro in 0..glyph_row_stride {
-                            atlas.bytes[start_address + ro] = gb.data[hix * glyph_row_stride + ro];
-                        }
-                        // atlas.bytes[start_address..(start_address + glyph_row_stride)] = gb.data[hix*glyph_row_stride..(hix + 1)*glyph_row_stride];
+                let x_offset_in_atlas = (gbbox.0 as usize) * std::mem::size_of::<u8>();
+                for hix in 0..gb.height {
+                    let start_address =
+                        x_offset_in_atlas + (hix + (gbbox.2 as usize)) * self.row_stride;
+                    for ro in 0..glyph_row_stride {
+                        self.bytes[start_address + ro] = gb.data[hix * glyph_row_stride + ro];
                     }
                 }
-                None => {}
+
+                Some(gbbox)
+            },
+            None => {
+                None
             }
+        };
+        self.glyph_bboxes.push(in_atlas_bbox);
+
+        self.glyph_advances.push(glyph_advance);
+
+        self.glyph_top_offsets.push(glyph_top_offset);
+    }
+
+    pub fn generate_atlas(
+        atlas_width: u16,
+        atlas_height: u16,
+        glyph_chars: Vec<char>,
+        glyph_font_sizes: Vec<u32>,
+        fonts: Vec<&Font>,
+    ) -> Atlas {
+        let mut atlas = Atlas::create_empty_atlas(atlas_width, atlas_height);
+
+        for i in 0..glyph_chars.len() {
+            atlas.insert_character(glyph_chars[i], glyph_font_sizes[i], fonts[i]);
         }
 
         atlas
@@ -305,20 +320,16 @@ impl Atlas {
         .expect("failed to dump raw atlas as png image");
     }
 
-    pub fn get_glyph_index_of_char(&self, c: char) -> usize {
-        match self.char_to_ix_map.get(&c) {
+    pub fn get_glyph_index_of_char(&self, c: char, font_size: u32) -> usize {
+        //TODO: distinguish by character, font size, and font; not just character and font size!
+        match self.char_to_ix_map.get(&(c, font_size)) {
             Some(v) => *v,
             None => panic!("atlas: could not find char '{}'", c),
         }
     }
 }
 
-pub fn create_atlas(
-    glyph_chars: Vec<char>,
-    font_size: u32,
-    atlas_width: u16,
-    atlas_height: u16,
-) -> Atlas {
+pub fn load_font<'a>() -> Font<'a> {
     let filename: PathBuf = ["resources", "notomono", "NotoMono-Regular.ttf"]
         .iter()
         .collect();
@@ -329,67 +340,11 @@ pub fn create_atlas(
         .to_str()
         .expect("could not convert filename to string");
 
-    let font = match f.read_to_end(&mut data) {
+    match f.read_to_end(&mut data) {
         Err(e) => panic!("failed to read {}, {}", str_filename, e),
         Ok(_) => match parse(&data) {
             Ok(font) => font,
             Err(_) => panic!("failed to parse {}", str_filename),
         },
-    };
-
-    //    let glyph_chars: Vec<char> = (0_u32..10_u32)
-    //        .map(|d| {
-    //            std::char::from_digit(d, 10).expect(&format!("could not convert digit {} to char", d))
-    //        })
-    //        .collect();
-    let glyph_cps: Vec<u32> = glyph_chars.iter().map(|&c| c as u32).collect();
-    let glyph_ids: Vec<u16> = glyph_chars
-        .iter()
-        .zip(glyph_cps.iter())
-        .map(|(gc, &gcp)| {
-            font.lookup_glyph_id(gcp)
-                .expect(&format!("error looking up glyph id of character: {}", gc))
-        })
-        .collect();
-
-    let glyph_advances: Vec<u32> = glyph_chars
-        .iter()
-        .zip(&glyph_ids)
-        .map(|(gc, &gid)| {
-            font.get_h_metrics(gid, font_size)
-                .expect(&format!(
-                    "could not retrieve h metrics for glyph '{}' in font",
-                    gc
-                ))
-                .advance_width
-                .round() as u32
-        })
-        .collect();
-
-    let rendered_glyphs: Vec<Option<GlyphBitmap>> = glyph_chars
-        .iter()
-        .zip(&glyph_ids)
-        .map(|(gc, &gid)| font.render_glyph(gid, font_size))
-        .collect();
-
-    let glyph_top_offsets: Vec<i32> = glyph_chars
-        .iter()
-        .zip(&rendered_glyphs)
-        .map(|(gc, ogb)| match ogb {
-            Some(gb) => gb.top,
-            None => 0,
-        })
-        .collect();
-
-    let atlas = Atlas::generate_atlas(
-        atlas_width,
-        atlas_height,
-        glyph_chars,
-        glyph_ids,
-        rendered_glyphs,
-        glyph_advances,
-        glyph_top_offsets,
-    );
-
-    atlas
+    }
 }
