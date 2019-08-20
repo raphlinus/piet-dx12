@@ -36,7 +36,7 @@ impl GenericObject {
 }
 
 pub struct Scene {
-    objects: Vec<GenericObject>,
+    pub objects: Vec<GenericObject>,
     pub atlas: Atlas,
 }
 
@@ -52,10 +52,10 @@ fn dedup<T: Eq + Hash + Copy>(v: &mut Vec<T>) {
 
 
 impl Scene {
-    pub fn new_empty() -> Scene {
+    pub fn new_empty(atlas_width: u16, atlas_height: u16) -> Scene {
         Scene {
             objects: Vec::new(),
-            atlas: Atlas::create_empty_atlas(512, 512),
+            atlas: Atlas::create_empty_atlas(atlas_width, atlas_height),
         }
     }
 
@@ -113,6 +113,7 @@ impl Scene {
 
         scene_in_bytes
     }
+
     pub fn append_circle(&mut self, circle: Circle, color: [u8; 4]) {
         self.objects.push(
             GenericObject {
@@ -154,12 +155,35 @@ impl Scene {
         );
     }
 
+    pub fn initialize_test_scene0(
+        &mut self,
+        screen_width: u32,
+        screen_height: u32,
+    ) {
+        self.objects = Vec::new();
+
+        let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (100, 100);
+
+        let mut color: [u8; 4] = [255, 255, 255, 255];
+
+        let radius: f64 = 50.0;
+        self.append_circle(
+            Circle {
+                center: Point {
+                    x: radius + (scene_bbox_x_min as f64),
+                    y: radius + (scene_bbox_y_min as f64),
+                },
+                radius,
+            },
+            color,
+        );
+    }
+
     pub fn populate_randomly(
         &mut self,
         screen_width: u32,
         screen_height: u32,
         num_objects: u32,
-        glyph_atlas: Atlas,
     ) {
         let mut rng = rand::thread_rng();
 
@@ -188,9 +212,9 @@ impl Scene {
                     color,
                 );
             } else {
-                let glyph_ix: usize = rng.gen_range(0, glyph_atlas.glyph_count as usize);
+                let glyph_ix: usize = rng.gen_range(0, self.atlas.glyph_count as usize);
 
-                match glyph_atlas.glyph_bboxes[glyph_ix] {
+                match self.atlas.glyph_bboxes[glyph_ix] {
                     Some(glyph_bbox) => {
                         self.append_glyph(
                             glyph_ix as u16,
@@ -212,6 +236,12 @@ impl Scene {
                     None => {},
                 }
             }
+        }
+    }
+
+    pub fn add_characters_to_atlas(&mut self, characters: &str, font_size: u32, font: &Font) {
+        for c in characters.chars() {
+            self.atlas.insert_character(c, font_size, font);
         }
     }
 

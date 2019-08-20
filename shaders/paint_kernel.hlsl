@@ -294,6 +294,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
 
     uint init_address = num_commands_address + 4;
 
+    /**
     for (uint i = 0; i < this_tile_num_commands; i++) {
         //float4 fg = {0.0, 0.0, 0.0, 0.0};
         uint command_address = i*object_size + init_address;
@@ -324,6 +325,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             bg = blend_pd_over(bg, fg);
         }
     }
+    **/
 
     /**
     uint2 packed_in_atlas_bbox0 = load_packed_in_atlas_bbox_at_object_index(0);
@@ -367,7 +369,6 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     **/
 
 
-    /**
     uint2 rect_origin = {800, 300};
     uint2 rect_size = {50, 10};
     fg.r = 1.0;
@@ -375,16 +376,29 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     fg.b = 1.0;
     fg.a = 0.0;
 
-    uint2 packed_in_atlas_bbox2 = load_packed_in_atlas_bbox_at_object_index(2);
-    uint4 in_atlas_bbox2 = unpack_bbox(packed_in_atlas_bbox2);
-    uint2 packed_in_scene_bbox2 = load_packed_in_scene_bbox_at_object_index(2);
-    uint4 in_scene_bbox2 = unpack_bbox(packed_in_scene_bbox2);
-    bool hit2 = is_pixel_in_bbox(pixel_pos, in_scene_bbox2);
+    uint packed_object_specific_data = load_packed_object_specific_data_at_object_index(0);
+    uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
 
-    fg.a = number_shader(in_scene_bbox2[0], pixel_pos, rect_origin, rect_size);
+    uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_at_object_index(0);
+    uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
+
+    uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_at_object_index(0);
+    uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
+
+    uint packed_color = load_packed_color_at_object_index(0);
+    float4 color = unpack_color(packed_color);
+
+    bool hit = is_pixel_in_bbox(packed_color, in_scene_bbox);
+
+    /**
+    if (hit) {
+        fg.a = 1.0;
+    }
+    */
+
+    fg.a = number_shader(packed_color, pixel_pos, rect_origin, rect_size);
 
     bg = blend_pd_over(bg, fg);
-    **/
 
     /**
     if (scene_bbox_hit) {

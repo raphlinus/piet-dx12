@@ -71,9 +71,9 @@ pub struct DX12RenderContext {
 }
 
 impl DX12RenderContext {
-    pub unsafe fn new() -> DX12RenderContext {
+    pub unsafe fn new(atlas_width: u16, atlas_height: u16) -> DX12RenderContext {
         DX12RenderContext {
-            scene: scene::Scene::new_empty(),
+            scene: scene::Scene::new_empty(atlas_width, atlas_height),
             text: DX12Text,
         }
     }
@@ -238,25 +238,51 @@ fn main() {
         let wnd = window::Window::new(win32_string("test"), win32_string("test"));
 
         let num_renders: u32 = 1000;
+        let atlas_width: u16 = 512;
+        let atlas_height: u16 = 512;
+
+        let mut render_context = DX12RenderContext::new(atlas_width, atlas_height);
+        //let custom_font = atlas::FontBytes::new();
+        //let font_rs_obj = custom_font.generate_font_rs_object();
+        //render_context.scene.add_characters_to_atlas("0123456789", 50, &font_rs_obj);
+        //render_context.scene.atlas.dump_bytes_as_rgba_image();
+        //render_context.scene.populate_randomly(wnd.get_width(), wnd.get_height(), num_objects);
+        render_context.scene.initialize_test_scene0(wnd.get_width(), wnd.get_height());
+        let tile_side_length_in_pixels = 16;
+
+        let num_objects: u32 = render_context.scene.objects.len() as u32;
+        println!("num_objects: {}", num_objects);
+        println!("scene in bytes: {:?}", render_context.scene.to_bytes());
+
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
             String::from("build_per_tile_command_list"),
             String::from("paint_objects"),
             String::from("VSMain"),
             String::from("PSMain"),
-            1000,
-            16,
+            num_objects,
+            tile_side_length_in_pixels,
             32,
             1,
             1,
             1,
-            512,
-            512,
-            512*512,
-            1000,
+            atlas_width as u64,
+            atlas_height as u32,
+            (atlas_width as u64)*(atlas_height as u64),
+            num_renders,
         );
 
-        let render_context = DX12RenderContext::new();
+        let constants = gpu::Constants {
+            num_objects: num_objects,
+            object_size: scene::GenericObject::size_in_bytes() as u32,
+            tile_size: tile_side_length_in_pixels,
+            num_tiles_x: gpu_state.num_tiles_x,
+            num_tiles_y: gpu_state.num_tiles_y,
+        };
+
+        gpu_state.upload_data(Some(constants), None, None);
+
+        //panic!("stop");
 
         for i in 0..num_renders {
             gpu_state.render(i, &render_context.scene.atlas.bytes);

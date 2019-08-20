@@ -329,22 +329,38 @@ impl Atlas {
     }
 }
 
-pub fn load_font<'a>() -> Font<'a> {
-    let filename: PathBuf = ["resources", "notomono", "NotoMono-Regular.ttf"]
-        .iter()
-        .collect();
-    let mut f = File::open(&filename).unwrap();
-    let mut data = Vec::new();
+//TODO: fix font-rs Font so that it's signature is Font<T: AsRef<[u8]>> instead of Font<'a>
+// FontBytes is a band-aid solution.
+pub struct FontBytes {
+    bytes: Vec<u8>,
+}
 
-    let str_filename = filename
-        .to_str()
-        .expect("could not convert filename to string");
+impl FontBytes {
+    pub fn new() -> FontBytes {
+        let filename: PathBuf = ["resources", "notomono", "NotoMono-Regular.ttf"]
+            .iter()
+            .collect();
+        let mut f = File::open(&filename).unwrap();
+        let mut data = Vec::new();
 
-    match f.read_to_end(&mut data) {
-        Err(e) => panic!("failed to read {}, {}", str_filename, e),
-        Ok(_) => match parse(&data) {
+        let str_filename = filename
+            .to_str()
+            .expect("could not convert filename to string");
+
+        match f.read_to_end(&mut data) {
+            Err(e) => panic!("failed to read {}, {}", str_filename, e),
+            Ok(_) => {
+                FontBytes {
+                    bytes: data,
+                }
+            }
+        }
+    }
+
+    pub fn generate_font_rs_object<'a>(&'a self) -> Font<'a> {
+        match parse(&self.bytes) {
             Ok(font) => font,
-            Err(_) => panic!("failed to parse {}", str_filename),
-        },
+            Err(_) => panic!("failed to parse bytes as font!"),
+        }
     }
 }

@@ -16,17 +16,6 @@ pub type VertexCoordinates = [f32; 3];
 pub type VertexColor = [f32; 4];
 pub type Vertex = VertexCoordinates;
 
-unsafe fn store_u32_in_256_bytes(x: u32) -> [u8; 256] {
-    let mut result: [u8; 256] = [0; 256];
-    let x_in_bytes: [u8; 4] = mem::transmute(x);
-
-    for n in 0..4 {
-        result[n] = x_in_bytes[n];
-    }
-
-    result
-}
-
 fn convert_rect_to_vertices(rc: Rect) -> [Vertex; 4] {
     //TODO: cannot get convert f64 into f32 using try_from; how should possible round off/overflow be handled gracefully?
     let (x0, x1, y0, y1) = {
@@ -98,17 +87,17 @@ enum TimingQueryPoints {
 }
 
 struct TimingData {
-    begin_cmd_tps: Vec<f64>,
-    ptcl_init_complete_ts: Vec<f64>,
+    _begin_cmd_tps: Vec<f64>,
+    _ptcl_init_complete_ts: Vec<f64>,
     ptcl_dispatch_ts: Vec<f64>,
-    ptcl_buf_sync_ts: Vec<f64>,
-    paint_init_complete_ts: Vec<f64>,
+    _ptcl_buf_sync_ts: Vec<f64>,
+    _paint_init_complete_ts: Vec<f64>,
     paint_atlas_updated_ts: Vec<f64>,
     paint_dispatch_ts: Vec<f64>,
-    canvas_buf_sync_ts: Vec<f64>,
-    draw_init_complete_ts: Vec<f64>,
+    _canvas_buf_sync_ts: Vec<f64>,
+    _draw_init_complete_ts: Vec<f64>,
     draw_ts: Vec<f64>,
-    end_cmd_ts: Vec<f64>,
+    _end_cmd_ts: Vec<f64>,
 }
 
 fn interpret_timing_data_in_ms(
@@ -189,17 +178,17 @@ fn interpret_timing_data_in_ms(
     }
 
     TimingData {
-        begin_cmd_tps,
-        ptcl_init_complete_ts,
+        _begin_cmd_tps: begin_cmd_tps,
+        _ptcl_init_complete_ts: ptcl_init_complete_ts,
         ptcl_dispatch_ts,
-        ptcl_buf_sync_ts,
-        paint_init_complete_ts,
+        _ptcl_buf_sync_ts: ptcl_buf_sync_ts,
+        _paint_init_complete_ts: paint_init_complete_ts,
         paint_atlas_updated_ts,
         paint_dispatch_ts,
-        canvas_buf_sync_ts,
-        draw_init_complete_ts,
+        _canvas_buf_sync_ts: canvas_buf_sync_ts,
+        _draw_init_complete_ts: draw_init_complete_ts,
         draw_ts,
-        end_cmd_ts,
+        _end_cmd_ts: end_cmd_ts,
     }
 }
 
@@ -233,11 +222,11 @@ pub enum PaintDescriptorRanges {
 
 // should match constants buffer as described in shaders
 pub struct Constants {
-    num_objects: u32,
-    object_size: u32,
-    tile_size: u32,
-    num_tiles_x: u32,
-    num_tiles_y: u32,
+    pub num_objects: u32,
+    pub object_size: u32,
+    pub tile_size: u32,
+    pub num_tiles_x: u32,
+    pub num_tiles_y: u32,
 }
 
 impl Constants {
@@ -247,9 +236,6 @@ impl Constants {
 }
 
 pub struct GpuState {
-    width: u32,
-    height: u32,
-
     // pipeline stuff
     device: dx12::Device,
     command_allocators: Vec<dx12::CommandAllocator>,
@@ -259,15 +245,15 @@ pub struct GpuState {
     viewport: d3d12::D3D12_VIEWPORT,
     scissor_rect: d3d12::D3D12_RECT,
     swapchain: dx12::SwapChain3,
-    vertex_buffer: dx12::Resource,
+    _vertex_buffer: dx12::Resource,
     vertex_buffer_view: d3d12::D3D12_VERTEX_BUFFER_VIEW,
     rtv_descriptor_heap: dx12::DescriptorHeap,
     render_targets: Vec<dx12::Resource>,
     graphics_pipeline_root_signature: dx12::RootSignature,
     graphics_pipeline_state: dx12::PipelineState,
 
-    num_tiles_x: u32,
-    num_tiles_y: u32,
+    pub num_tiles_x: u32,
+    pub num_tiles_y: u32,
     num_ptcl_tg_x: u32,
     num_ptcl_tg_y: u32,
 
@@ -313,9 +299,6 @@ impl GpuState {
         atlas_size_in_bytes: u64,
         num_renders: u32,
     ) -> GpuState {
-        //        atlas.dump_bytes_as_rgba_image();
-        //        panic!("stop");
-
         let width = wnd.get_width();
         let height = wnd.get_height();
 
@@ -500,9 +483,6 @@ impl GpuState {
         let timing_query_buffer = GpuState::create_timing_query_buffer(device.clone(), num_renders);
 
         let mut gpu_state = GpuState {
-            width,
-            height,
-
             // pipeline stuff
             device,
             command_allocators,
@@ -512,7 +492,7 @@ impl GpuState {
             viewport,
             scissor_rect,
             swapchain,
-            vertex_buffer,
+            _vertex_buffer: vertex_buffer,
             vertex_buffer_view,
             rtv_descriptor_heap,
             render_targets,
@@ -1085,6 +1065,8 @@ impl GpuState {
             descriptor_heap_offset,
         );
         println!("creating object data buffer...");
+        let object_data: [u8; 24] = [100; 24];
+        object_data_buffer.upload_data_to_resource(object_data.len(), object_data.as_ptr());
         device.create_byte_addressed_buffer_shader_resource_view(
             object_data_buffer.clone(),
             descriptor_heap

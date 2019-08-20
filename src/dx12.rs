@@ -111,6 +111,7 @@ impl Resource {
             &mut mapped_memory as *mut _ as *mut _,
         ))
         .expect("could not map GPU mem to CPU mem");
+
         ptr::copy(data, mapped_memory, count);
         self.com_ptr.Unmap(0, ptr::null());
     }

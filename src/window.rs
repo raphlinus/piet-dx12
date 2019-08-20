@@ -4,7 +4,6 @@ use std::{os, vec::Vec};
 use winapi::shared::{minwindef, ntdef, windef};
 use winapi::um::{libloaderapi, shellscalingapi, wingdi, winuser};
 
-const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: windef::DPI_AWARENESS_CONTEXT = -4isize as _;
 type SetProcessDPIAware = unsafe extern "system" fn() -> minwindef::BOOL;
 type SetProcessDpiAwareness =
     unsafe extern "system" fn(value: shellscalingapi::PROCESS_DPI_AWARENESS) -> ntdef::HRESULT;
@@ -50,9 +49,9 @@ pub struct DpiFunctions {
     get_dpi_for_window: Option<GetDpiForWindow>,
     get_dpi_for_monitor: Option<GetDpiForMonitor>,
     enable_nonclient_dpi_scaling: Option<EnableNonClientDpiScaling>,
-    set_process_dpi_awareness_context: Option<SetProcessDpiAwarenessContext>,
-    set_process_dpi_awareness: Option<SetProcessDpiAwareness>,
-    set_process_dpi_aware: Option<SetProcessDPIAware>,
+    _set_process_dpi_awareness_context: Option<SetProcessDpiAwarenessContext>,
+    _set_process_dpi_awareness: Option<SetProcessDpiAwareness>,
+    _set_process_dpi_aware: Option<SetProcessDPIAware>,
 }
 
 const BASE_DPI: u32 = 96;
@@ -63,37 +62,12 @@ impl DpiFunctions {
             get_dpi_for_window: get_function!("user32.dll", GetDpiForWindow),
             get_dpi_for_monitor: get_function!("shcore.dll", GetDpiForMonitor),
             enable_nonclient_dpi_scaling: get_function!("user32.dll", EnableNonClientDpiScaling),
-            set_process_dpi_awareness_context: get_function!(
+            _set_process_dpi_awareness_context: get_function!(
                 "user32.dll",
                 SetProcessDpiAwarenessContext
             ),
-            set_process_dpi_awareness: get_function!("shcore.dll", SetProcessDpiAwareness),
-            set_process_dpi_aware: get_function!("user32.dll", SetProcessDPIAware),
-        }
-    }
-
-    fn become_dpi_aware(&self) {
-        unsafe {
-            if let Some(set_process_dpi_awareness_context) = self.set_process_dpi_awareness_context
-            {
-                // We are on Windows 10 Anniversary Update (1607) or later.
-                if set_process_dpi_awareness_context(
-                    windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-                ) == minwindef::FALSE
-                {
-                    // V2 only works with Windows 10 Creators Update (1703). Try using the older
-                    // V1 if we can't set V2.
-                    set_process_dpi_awareness_context(
-                        windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
-                    );
-                }
-            } else if let Some(set_process_dpi_awareness) = self.set_process_dpi_awareness {
-                // We are on Windows 8.1 or later.
-                set_process_dpi_awareness(shellscalingapi::PROCESS_PER_MONITOR_DPI_AWARE);
-            } else if let Some(set_process_dpi_aware) = self.set_process_dpi_aware {
-                // We are on Vista or later.
-                set_process_dpi_aware();
-            }
+            _set_process_dpi_awareness: get_function!("shcore.dll", SetProcessDpiAwareness),
+            _set_process_dpi_aware: get_function!("user32.dll", SetProcessDPIAware),
         }
     }
 
@@ -189,10 +163,6 @@ pub struct WindowGeom {
 }
 
 pub struct Window {
-    name: Vec<u16>,
-    title: Vec<u16>,
-    class: winuser::WNDCLASSW,
-    hinstance: *mut minwindef::HINSTANCE__,
     pub hwnd: *mut windef::HWND__,
     dpi_functions: DpiFunctions,
 }
@@ -237,10 +207,6 @@ impl Window {
         }
 
         Window {
-            name,
-            title,
-            class,
-            hinstance,
             hwnd,
             dpi_functions: DpiFunctions::new(),
         }
