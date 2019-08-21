@@ -1,15 +1,15 @@
-extern crate winapi;
 extern crate kurbo;
+extern crate winapi;
 
 use crate::dx12;
 use crate::scene;
 use crate::window;
+use kurbo::Rect;
 use std::convert::TryFrom;
 use std::path::Path;
 use std::{mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgiformat, dxgitype, minwindef, winerror};
 use winapi::um::{d3d12, d3dcommon};
-use kurbo::Rect;
 
 const FRAME_COUNT: u32 = 2;
 pub type VertexCoordinates = [f32; 3];
@@ -31,12 +31,7 @@ fn convert_rect_to_vertices(rc: Rect) -> [Vertex; 4] {
         )
     };
 
-    [
-        [x0, y0, 0.0],
-        [x0, y1, 0.0],
-        [x1, y0, 0.0],
-        [x1, y1, 0.0],
-    ]
+    [[x0, y0, 0.0], [x0, y1, 0.0], [x1, y0, 0.0], [x1, y1, 0.0]]
 }
 
 const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
@@ -231,7 +226,8 @@ pub struct Constants {
 
 impl Constants {
     pub fn determine_num_constants() -> u8 {
-        u8::try_from(mem::size_of::<Constants>() / mem::size_of::<u32>()).expect("could not convert number of constants into u8 value")
+        u8::try_from(mem::size_of::<Constants>() / mem::size_of::<u32>())
+            .expect("could not convert number of constants into u8 value")
     }
 }
 
@@ -305,10 +301,8 @@ impl GpuState {
         let f_tile_side_length_in_pixels = tile_side_length_in_pixels as f32;
         let f_width = width as f32;
         let f_height = height as f32;
-        let cw =
-            (f_width / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
-        let ch =
-            (f_height / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
+        let cw = (f_width / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
+        let ch = (f_height / f_tile_side_length_in_pixels).ceil() * f_tile_side_length_in_pixels;
         let num_tiles_x = {
             let min_ntx = (cw / f_tile_side_length_in_pixels) as u32;
             let remainder = min_ntx % per_tile_command_lists_num_tiles_per_tg_x;
@@ -338,7 +332,10 @@ impl GpuState {
 
         let canvas_rect = {
             let (x0, y0) = {
-                (-1.0 * (canvas_width / 2.0) as f64, -1.0 * (canvas_height / 2.0) as f64)
+                (
+                    -1.0 * (canvas_width / 2.0) as f64,
+                    -1.0 * (canvas_height / 2.0) as f64,
+                )
             };
 
             Rect {
@@ -426,8 +423,12 @@ impl GpuState {
                 command_queue.clone(),
             );
 
-        let per_tile_command_lists_buffer_size_in_u32s = (scene::GenericObject::size_in_u32s() * max_scene_objects + 1) * num_tiles_x * num_tiles_y;
-        let object_data_buffer_size_in_bytes = max_scene_objects as u64 * scene::GenericObject::size_in_bytes() as u64;
+        let per_tile_command_lists_buffer_size_in_u32s =
+            (scene::GenericObject::size_in_u32s() * max_scene_objects + 1)
+                * num_tiles_x
+                * num_tiles_y;
+        let object_data_buffer_size_in_bytes =
+            max_scene_objects as u64 * scene::GenericObject::size_in_bytes() as u64;
         let num_constants = Constants::determine_num_constants();
 
         let (
@@ -1023,14 +1024,12 @@ impl GpuState {
         descriptor_heap_offset: u32,
     ) -> dx12::Resource {
         let size_of_u32 = mem::size_of::<u32>();
-        let object_data_buffer_size_in_u32s =
-            {
-                let s = size_of_u32 as f64;
-                let o = object_data_buffer_size_in_bytes as f64;
+        let object_data_buffer_size_in_u32s = {
+            let s = size_of_u32 as f64;
+            let o = object_data_buffer_size_in_bytes as f64;
 
-                (o/s).ceil() as u32
-
-            };
+            (o / s).ceil() as u32
+        };
 
         let object_data_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
             Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
@@ -1507,13 +1506,28 @@ impl GpuState {
         )
     }
 
-    unsafe fn upload_data_to_constants_buffer(&mut self, num_objects: u32, object_size: u32, tile_size: u32, num_tiles_x: u32, num_tiles_y: u32) {
-        let constants = [num_objects, object_size, tile_size, num_tiles_x, num_tiles_y];
-        self.constants_buffer.upload_data_to_resource(constants.len(), constants.as_ptr());
+    unsafe fn upload_data_to_constants_buffer(
+        &mut self,
+        num_objects: u32,
+        object_size: u32,
+        tile_size: u32,
+        num_tiles_x: u32,
+        num_tiles_y: u32,
+    ) {
+        let constants = [
+            num_objects,
+            object_size,
+            tile_size,
+            num_tiles_x,
+            num_tiles_y,
+        ];
+        self.constants_buffer
+            .upload_data_to_resource(constants.len(), constants.as_ptr());
     }
 
     unsafe fn upload_data_to_object_data_buffer(&mut self, object_data: Vec<u8>) {
-        self.object_data_buffer.upload_data_to_resource(object_data.len(), object_data.as_ptr());
+        self.object_data_buffer
+            .upload_data_to_resource(object_data.len(), object_data.as_ptr());
     }
 
     unsafe fn upload_atlas_texture_data_to_intermediate_buffer(&mut self, texture_data: &[u8]) {
@@ -1522,26 +1536,37 @@ impl GpuState {
         self.atlas_texture_data_uploaded = false;
     }
 
-    pub unsafe fn upload_data(&mut self, constants: Option<Constants>, object_data: Option<Vec<u8>>, atlas_bytes: Option<&[u8]>) {
+    pub unsafe fn upload_data(
+        &mut self,
+        constants: Option<Constants>,
+        object_data: Option<Vec<u8>>,
+        atlas_bytes: Option<&[u8]>,
+    ) {
         match constants {
             Some(c) => {
-                self.upload_data_to_constants_buffer(c.num_objects, c.object_size, c.tile_size, c.num_tiles_x, c.num_tiles_y);
-            },
-            None => {},
+                self.upload_data_to_constants_buffer(
+                    c.num_objects,
+                    c.object_size,
+                    c.tile_size,
+                    c.num_tiles_x,
+                    c.num_tiles_y,
+                );
+            }
+            None => {}
         }
 
         match object_data {
             Some(bytes) => {
                 self.upload_data_to_object_data_buffer(bytes);
-            },
-            None => {},
+            }
+            None => {}
         }
 
         match atlas_bytes {
             Some(bytes) => {
                 self.upload_atlas_texture_data_to_intermediate_buffer(bytes);
-            },
-            None => {},
+            }
+            None => {}
         }
 
         self.wait_for_gpu();

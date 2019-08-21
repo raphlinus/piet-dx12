@@ -5,11 +5,9 @@ use crate::dx12;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
-use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
-
-use font_rs::font::{parse, Font};
+use font_rs::font::{Font as RawFont};
 
 #[derive(Clone, Copy)]
 pub struct AtlasCursor {
@@ -97,16 +95,19 @@ impl Atlas {
         }
     }
 
-    pub fn insert_character(&mut self, c: char, font_size: u32, font: &Font) {
+    pub fn insert_character(&mut self, c: char, font_size: u32, font: &RawFont) {
         //TODO: distinguish by character, font size, and font; not just character and font size!
         if self.char_to_ix_map.contains_key(&(c, font_size)) {
             return;
         }
 
         let glyph_code_point = c as u32;
-        let glyph_id = font.lookup_glyph_id(glyph_code_point).expect(&format!("error looking up glyph id of character: {}", c));
+        let glyph_id = font
+            .lookup_glyph_id(glyph_code_point)
+            .expect(&format!("error looking up glyph id of character: {}", c));
 
-        let glyph_advance = font.get_h_metrics(glyph_id, font_size)
+        let glyph_advance = font
+            .get_h_metrics(glyph_id, font_size)
             .expect(&format!(
                 "could not retrieve h metrics for glyph '{}' in font",
                 c
@@ -131,9 +132,7 @@ impl Atlas {
                     .expect("could not safely convert glyph bitmap width to u16");
                 // println!("atlas: allocating space for glyph of character '{}'", gc);
                 let tl = match self.allocate_rect(gw, gh) {
-                    Ok(result) => {
-                        result
-                    },
+                    Ok(result) => result,
                     Err(err) => {
                         panic!("atlas: could not allocate space for glyph of character '{}', with size ({}, {}), error: {}", c, gw, gh, err);
                     }
@@ -154,10 +153,8 @@ impl Atlas {
                 }
 
                 Some(gbbox)
-            },
-            None => {
-                None
             }
+            None => None,
         };
         self.glyph_bboxes.push(in_atlas_bbox);
 
@@ -171,7 +168,7 @@ impl Atlas {
         atlas_height: u16,
         glyph_chars: Vec<char>,
         glyph_font_sizes: Vec<u32>,
-        fonts: Vec<&Font>,
+        fonts: Vec<&RawFont>,
     ) -> Atlas {
         let mut atlas = Atlas::create_empty_atlas(atlas_width, atlas_height);
 
@@ -325,42 +322,6 @@ impl Atlas {
         match self.char_to_ix_map.get(&(c, font_size)) {
             Some(v) => *v,
             None => panic!("atlas: could not find char '{}'", c),
-        }
-    }
-}
-
-//TODO: fix font-rs Font so that it's signature is Font<T: AsRef<[u8]>> instead of Font<'a>
-// FontBytes is a band-aid solution.
-pub struct FontBytes {
-    bytes: Vec<u8>,
-}
-
-impl FontBytes {
-    pub fn new() -> FontBytes {
-        let filename: PathBuf = ["resources", "notomono", "NotoMono-Regular.ttf"]
-            .iter()
-            .collect();
-        let mut f = File::open(&filename).unwrap();
-        let mut data = Vec::new();
-
-        let str_filename = filename
-            .to_str()
-            .expect("could not convert filename to string");
-
-        match f.read_to_end(&mut data) {
-            Err(e) => panic!("failed to read {}, {}", str_filename, e),
-            Ok(_) => {
-                FontBytes {
-                    bytes: data,
-                }
-            }
-        }
-    }
-
-    pub fn generate_font_rs_object<'a>(&'a self) -> Font<'a> {
-        match parse(&self.bytes) {
-            Ok(font) => font,
-            Err(_) => panic!("failed to parse bytes as font!"),
         }
     }
 }

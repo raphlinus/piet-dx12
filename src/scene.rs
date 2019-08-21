@@ -1,12 +1,11 @@
 extern crate byteorder;
-extern crate rand;
-extern crate kurbo;
 extern crate font_rs;
+extern crate kurbo;
+extern crate rand;
 
 use font_rs::font::Font;
-use kurbo::{Circle, Rect, Point};
+use kurbo::{Circle, Point, Rect};
 
-use crate::atlas::Atlas;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rand::Rng;
 use std::convert::TryFrom;
@@ -25,11 +24,18 @@ pub struct GenericObject {
     color: [u8; 4],
 }
 
+pub struct PlacedGlyph {
+    atlas_glyph_index: u32,
+    in_atlas_bbox: Rect,
+    pub placed_bbox: Rect,
+}
+
 impl GenericObject {
     pub fn size_in_u32s() -> u32 {
-        u32::try_from(mem::size_of::<GenericObject>() / mem::size_of::<u32>()).expect("could not convert GenericObject size in u32s into u32 value")
+        u32::try_from(mem::size_of::<GenericObject>() / mem::size_of::<u32>())
+            .expect("could not convert GenericObject size in u32s into u32 value")
     }
-    
+
     pub fn size_in_bytes() -> usize {
         mem::size_of::<GenericObject>()
     }
@@ -37,25 +43,12 @@ impl GenericObject {
 
 pub struct Scene {
     pub objects: Vec<GenericObject>,
-    pub atlas: Atlas,
 }
-
-use std::collections::HashSet;
-use std::hash::Hash;
-
-// https://stackoverflow.com/a/47648303/3486684
-fn dedup<T: Eq + Hash + Copy>(v: &mut Vec<T>) {
-    // note the Copy constraint
-    let mut uniques = HashSet::new();
-    v.retain(|e| uniques.insert(*e));
-}
-
 
 impl Scene {
-    pub fn new_empty(atlas_width: u16, atlas_height: u16) -> Scene {
+    pub fn new_empty() -> Scene {
         Scene {
-            objects: Vec::new(),
-            atlas: Atlas::create_empty_atlas(atlas_width, atlas_height),
+            objects: Vec::new()
         }
     }
 
@@ -115,20 +108,18 @@ impl Scene {
     }
 
     pub fn append_circle(&mut self, circle: Circle, color: [u8; 4]) {
-        self.objects.push(
-            GenericObject {
-                object_type: ObjectType::Circle as u16,
-                glyph_id: 0,
-                in_atlas_bbox: (0, 0, 0, 0),
-                in_scene_bbox: (
-                    (circle.center.x - circle.radius) as u16,
-                    (circle.center.x + circle.radius) as u16,
-                    (circle.center.y - circle.radius) as u16,
-                    (circle.center.y + circle.radius) as u16,
-                ),
-                color,
-            }
-        );
+        self.objects.push(GenericObject {
+            object_type: ObjectType::Circle as u16,
+            glyph_id: 0,
+            in_atlas_bbox: (0, 0, 0, 0),
+            in_scene_bbox: (
+                (circle.center.x - circle.radius) as u16,
+                (circle.center.x + circle.radius) as u16,
+                (circle.center.y - circle.radius) as u16,
+                (circle.center.y + circle.radius) as u16,
+            ),
+            color,
+        });
     }
 
     pub fn append_glyph(
@@ -138,33 +129,31 @@ impl Scene {
         in_scene_bbox: Rect,
         color: [u8; 4],
     ) {
-        self.objects.push(
-            GenericObject {
-                object_type: ObjectType::Glyph as u16,
-                glyph_id,
-                in_atlas_bbox: (in_atlas_bbox.x0 as u16,
-                                in_atlas_bbox.x1 as u16,
-                                in_atlas_bbox.y0 as u16,
-                                in_atlas_bbox.y1 as u16,),
-                in_scene_bbox: (in_scene_bbox.x0 as u16,
-                                in_scene_bbox.x1 as u16,
-                                in_scene_bbox.y0 as u16,
-                                in_scene_bbox.y1 as u16,),
-                color,
-            }
-        );
+        self.objects.push(GenericObject {
+            object_type: ObjectType::Glyph as u16,
+            glyph_id,
+            in_atlas_bbox: (
+                in_atlas_bbox.x0 as u16,
+                in_atlas_bbox.x1 as u16,
+                in_atlas_bbox.y0 as u16,
+                in_atlas_bbox.y1 as u16,
+            ),
+            in_scene_bbox: (
+                in_scene_bbox.x0 as u16,
+                in_scene_bbox.x1 as u16,
+                in_scene_bbox.y0 as u16,
+                in_scene_bbox.y1 as u16,
+            ),
+            color,
+        });
     }
 
-    pub fn initialize_test_scene0(
-        &mut self,
-        screen_width: u32,
-        screen_height: u32,
-    ) {
+    pub fn initialize_test_scene0(&mut self) {
         self.objects = Vec::new();
 
         let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (100, 100);
 
-        let mut color: [u8; 4] = [255, 255, 255, 255];
+        let color: [u8; 4] = [255, 255, 255, 255];
 
         let radius: f64 = 50.0;
         self.append_circle(
@@ -179,12 +168,7 @@ impl Scene {
         );
     }
 
-    pub fn populate_randomly(
-        &mut self,
-        screen_width: u32,
-        screen_height: u32,
-        num_objects: u32,
-    ) {
+    pub fn populate_randomly(&mut self, screen_width: u32, screen_height: u32, num_objects: u32) {
         let mut rng = rand::thread_rng();
 
         for _ in 0..num_objects {
@@ -228,12 +212,12 @@ impl Scene {
                                 x0: scene_bbox_x_min as f64,
                                 x1: (scene_bbox_x_min + (glyph_bbox.1 - glyph_bbox.0)) as f64,
                                 y0: scene_bbox_y_min as f64,
-                                y1: (scene_bbox_y_min + (glyph_bbox.3 -  glyph_bbox.2)) as f64,
+                                y1: (scene_bbox_y_min + (glyph_bbox.3 - glyph_bbox.2)) as f64,
                             },
                             color,
                         );
-                    },
-                    None => {},
+                    }
+                    None => {}
                 }
             }
         }
@@ -245,61 +229,25 @@ impl Scene {
         }
     }
 
-    pub fn add_text(&mut self, screen_x_offset: u16, screen_y_offset: u16, text_string: &str, font_size: u32, font: &Font) {
-        let string_chars: Vec<char> = text_string.chars().collect();
-
-        let glyph_chars: Vec<char> = {
-            let mut result = string_chars.clone();
-            dedup(&mut result);
-            result
-        };
-
-        for &gc in glyph_chars.iter() {
-            self.atlas.insert_character(gc, font_size, font);
-        }
-
-        let mut x_cursor: u16 = screen_x_offset;
-        let screen_y_offset_i32 = screen_y_offset as i32;
-
-        for &c in string_chars.iter(){
-            let gix = self.atlas.get_glyph_index_of_char(c, font_size);
-            let glyph_advance = u16::try_from(self.atlas.glyph_advances[gix])
-                .expect("could not safely convert u32 glyph advance into u16");
-            let y_offset = u16::try_from(screen_y_offset_i32 + self.atlas.glyph_top_offsets[gix])
-                .expect("could not safely convert i32 glyph y offset into u16");
-
-            match self.atlas.glyph_bboxes[gix] {
-                Some(in_atlas_bbox) => {
-                    let (w, h) = {
-                        (in_atlas_bbox.1 - in_atlas_bbox.0, in_atlas_bbox.3 - in_atlas_bbox.2)
-                    };
-
-                    let in_scene_bbox_rect = Rect {
-                        x0: x_cursor as f64,
-                        x1: (x_cursor + w) as f64,
-                        y0: y_offset as f64,
-                        y1: (y_offset + h) as f64,
-                    };
-
-                    let in_atlas_bbox_rect = Rect {
-                      x0: in_atlas_bbox.0 as f64,
-                        x1: in_atlas_bbox.1 as f64,
-                        y0: in_atlas_bbox.2 as f64,
-                        y1: in_atlas_bbox.3 as f64,
-                    };
-
-                    self.append_glyph(
-                        gix as u16,
-                        in_atlas_bbox_rect,
-                        in_scene_bbox_rect,
-                        [255, 255, 255, 255],
-                    );
-                    x_cursor += (in_atlas_bbox.1 - in_atlas_bbox.0) + (0.2 * glyph_advance as f32).round() as u16;
-                }
-                None => {
-                    x_cursor += glyph_advance;
-                }
-            }
+    pub fn add_text(
+        &mut self,
+        screen_x_offset: u16,
+        screen_y_offset: u16,
+        placed_glyphs: &[PlacedGlyph],
+        color: [u8; 4],
+    ) {
+        for pg in placed_glyphs.iter() {
+            self.append_glyph(
+                pg.atlas_glyph_index as u16,
+                pg.in_atlas_bbox,
+                Rect {
+                    x0: pg.placed_bbox.x0 + (screen_x_offset as f64),
+                    x1: pg.placed_bbox.x1 + (screen_x_offset as f64),
+                    y0: pg.placed_bbox.y0 + (screen_y_offset as f64),
+                    y1: pg.placed_bbox.y1 + (screen_y_offset as f64),
+                },
+                color,
+            );
         }
     }
 }
