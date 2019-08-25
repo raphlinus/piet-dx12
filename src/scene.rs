@@ -1,13 +1,19 @@
+// Copyright © 2019 piet-dx12 developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 extern crate byteorder;
 extern crate font_rs;
 extern crate kurbo;
 extern crate rand;
 
-use font_rs::font::Font;
 use kurbo::{Circle, Point, Rect};
 
 use byteorder::{LittleEndian, WriteBytesExt};
-use rand::Rng;
 use std::convert::TryFrom;
 use std::mem;
 
@@ -166,67 +172,6 @@ impl Scene {
             },
             color,
         );
-    }
-
-    pub fn populate_randomly(&mut self, screen_width: u32, screen_height: u32, num_objects: u32) {
-        let mut rng = rand::thread_rng();
-
-        for _ in 0..num_objects {
-            let object_type: u16 = rng.gen_range(0, 2);
-            let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (
-                rng.gen_range(0, screen_width) as u16,
-                rng.gen_range(0, screen_height) as u16,
-            );
-
-            let mut color: [u8; 4] = [0; 4];
-            for i in 0..4 {
-                color[i] = rng.gen_range(0, 256) as u8;
-            }
-
-            if object_type == 0 {
-                let radius: f64 = rng.gen_range(10.0, 100.0);
-                self.append_circle(
-                    Circle {
-                        center: Point {
-                            x: radius + (scene_bbox_x_min as f64),
-                            y: radius + (scene_bbox_y_min as f64),
-                        },
-                        radius,
-                    },
-                    color,
-                );
-            } else {
-                let glyph_ix: usize = rng.gen_range(0, self.atlas.glyph_count as usize);
-
-                match self.atlas.glyph_bboxes[glyph_ix] {
-                    Some(glyph_bbox) => {
-                        self.append_glyph(
-                            glyph_ix as u16,
-                            Rect {
-                                x0: glyph_bbox.0 as f64,
-                                x1: glyph_bbox.1 as f64,
-                                y0: glyph_bbox.2 as f64,
-                                y1: glyph_bbox.3 as f64,
-                            },
-                            Rect {
-                                x0: scene_bbox_x_min as f64,
-                                x1: (scene_bbox_x_min + (glyph_bbox.1 - glyph_bbox.0)) as f64,
-                                y0: scene_bbox_y_min as f64,
-                                y1: (scene_bbox_y_min + (glyph_bbox.3 - glyph_bbox.2)) as f64,
-                            },
-                            color,
-                        );
-                    }
-                    None => {}
-                }
-            }
-        }
-    }
-
-    pub fn add_characters_to_atlas(&mut self, characters: &str, font_size: u32, font: &Font) {
-        for c in characters.chars() {
-            self.atlas.insert_character(c, font_size, font);
-        }
     }
 
     pub fn add_text(

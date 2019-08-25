@@ -1,3 +1,11 @@
+// Copyright © 2019 piet-dx12 developers.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 extern crate kurbo;
 extern crate winapi;
 
@@ -745,12 +753,8 @@ impl GpuState {
             .execute_command_lists(1, &[self.command_list.as_raw_list()]);
     }
 
-    pub unsafe fn render(&mut self, render_index: u32, atlas_as_bytes: &[u8]) {
+    pub unsafe fn render(&mut self, render_index: u32) {
         // println!("rendering frame: {}", render_index);
-
-        // we expect texture uploads to be happening every frame
-        self.intermediate_atlas_texture_upload_buffer
-            .upload_data_to_resource(atlas_as_bytes.len(), atlas_as_bytes.as_ptr());
 
         self.populate_command_list(render_index);
 
