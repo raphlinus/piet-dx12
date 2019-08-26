@@ -3,7 +3,7 @@ Experimental GPU-based 2D renderer using DX12.
 
 # Features
 
-* GPU based rendering of large number of 2D objects is optimized using per tile command lists.
+* GPU based rendering of large number of 2D objects is optimized using tiles to distribute workload on GPU processors efficiently. Workload distribution and object rendering are both achieved using compute kernels. 
 * Basic font atlas based text rendering.
 * Basic implementation of [piet](https://github.com/linebender/piet) specification.
 
