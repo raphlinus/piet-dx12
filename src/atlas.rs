@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
-use font_rs::font::{Font as RawFont};
+use font_rs::font::{Font as RawFont, GlyphBitmap};
 
 #[derive(Clone, Copy)]
 pub struct AtlasCursor {
@@ -122,7 +122,9 @@ impl Atlas {
             .advance_width
             .round() as u32;
 
-        let glyph_bitmap = font.render_glyph(glyph_id, font_size);
+        let glyph_bitmap: Option<GlyphBitmap> = font.render_glyph(glyph_id, font_size);
+
+
         let glyph_top_offset = match &glyph_bitmap {
             Some(gb) => gb.top,
             None => 0,
@@ -198,37 +200,37 @@ impl Atlas {
     }
 
     pub fn allocate_rect(&mut self, w: u16, h: u16) -> Result<(u16, u16), AllocationError> {
-        println!("===========");
-        println!("h: {}", h);
+        //println!("===========");
+        //println!("h: {}", h);
         if h > self.height {
-            println!("===========");
+            //println!("===========");
             Err(AllocationError::TooTall)
         } else if w > self.width {
-            println!("===========");
+            //println!("===========");
             Err(AllocationError::TooWide)
         } else {
             let log_h = approx_log2(h);
-            println!("log_h: {}", log_h);
+            //println!("log_h: {}", log_h);
             let fli = (log_h - 1) as usize;
-            println!("fli: {}", fli);
+            //println!("fli: {}", fli);
 
             if fli > 15 {
-                println!("===========");
+                //println!("===========");
                 Err(AllocationError::MassiveImage)
             } else {
                 match self.strip_free_lists[fli].last() {
                     Some(&ac) => {
-                        println!("existing ac: {}", ac);
+                        //println!("existing ac: {}", ac);
                         if (ac.x + w) > self.width {
-                            println!("ac.x + w > self.width...determining new strip");
+                            //println!("ac.x + w > self.width...determining new strip");
                             // calculate 2^log_h
                             let strip_height = 1 << log_h;
-                            println!("strip height: {}", strip_height);
+                            //println!("strip height: {}", strip_height);
                             let new_cursor_y = self.find_new_strip_cursor_y();
-                            println!("found new cursor y: {}", new_cursor_y);
+                            //println!("found new cursor y: {}", new_cursor_y);
 
                             if new_cursor_y + strip_height > self.height {
-                                println!("===========");
+                                //println!("===========");
                                 Err(AllocationError::AtlasFull)
                             } else {
                                 let new_cursor = AtlasCursor {
@@ -237,10 +239,10 @@ impl Atlas {
                                     strip_height,
                                 };
 
-                                println!("appending new cursor: {}", new_cursor);
+                                //println!("appending new cursor: {}", new_cursor);
                                 self.strip_free_lists[fli].push(new_cursor);
 
-                                println!("===========");
+                                //println!("===========");
                                 Ok((0, new_cursor_y + (strip_height - h)))
                             }
                         } else {
@@ -250,24 +252,24 @@ impl Atlas {
                                 strip_height: ac.strip_height,
                             };
 
-                            println!("appending new cursor: {}", new_cursor);
+                            //println!("appending new cursor: {}", new_cursor);
                             self.strip_free_lists[fli].push(new_cursor);
 
                             let tl = (ac.x, ac.y + (ac.strip_height - h));
-                            println!("tl: {}, {}", tl.0, tl.1);
+                            //println!("tl: {}, {}", tl.0, tl.1);
 
-                            println!("===========");
+                            //println!("===========");
                             Ok(tl)
                         }
                     }
                     None => {
                         // calculate 2^log_h
                         let strip_height = 1 << log_h;
-                        println!("strip height: {}", strip_height);
+                        //println!("strip height: {}", strip_height);
                         let new_cursor_y = self.find_new_strip_cursor_y();
 
                         if new_cursor_y + strip_height > self.height {
-                            println!("===========");
+                            //println!("===========");
                             Err(AllocationError::AtlasFull)
                         } else {
                             let new_cursor = AtlasCursor {
@@ -276,13 +278,13 @@ impl Atlas {
                                 strip_height,
                             };
 
-                            println!("appending new cursor: {}", new_cursor);
+                            //println!("appending new cursor: {}", new_cursor);
                             self.strip_free_lists[fli].push(new_cursor);
 
                             let tl = (0, new_cursor_y + (strip_height - h));
-                            println!("tl: {}, {}", tl.0, tl.1);
+                            //println!("tl: {}, {}", tl.0, tl.1);
 
-                            println!("===========");
+                            //println!("===========");
                             Ok(tl)
                         }
                     }

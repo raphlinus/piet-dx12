@@ -31,8 +31,8 @@ pub struct GenericObject {
 }
 
 pub struct PlacedGlyph {
-    atlas_glyph_index: u32,
-    in_atlas_bbox: Rect,
+    pub atlas_glyph_index: u32,
+    pub in_atlas_bbox: Rect,
     pub placed_bbox: Rect,
 }
 

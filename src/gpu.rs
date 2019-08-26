@@ -225,7 +225,7 @@ pub enum PaintDescriptorRanges {
 
 // should match constants buffer as described in shaders
 pub struct Constants {
-    pub num_objects: u32,
+    pub max_scene_objects: u32,
     pub object_size: u32,
     pub tile_size: u32,
     pub num_tiles_x: u32,
@@ -262,7 +262,7 @@ pub struct GpuState {
     num_ptcl_tg_y: u32,
 
     compute_descriptor_heap: dx12::DescriptorHeap,
-    constants_buffer: dx12::Resource,
+    _constants_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
     intermediate_atlas_texture_upload_buffer: dx12::Resource,
@@ -283,6 +283,8 @@ pub struct GpuState {
     query_heap: dx12::QueryHeap,
     timing_query_buffer: dx12::Resource,
     num_renders: u32,
+
+    _constants: Constants,
 }
 
 impl GpuState {
@@ -461,6 +463,11 @@ impl GpuState {
             canvas_height as u32,
         );
 
+        let object_size = scene::GenericObject::size_in_bytes() as u32;
+        let constants = [max_scene_objects, object_size, tile_side_length_in_pixels, num_tiles_x, num_tiles_y];
+        constants_buffer
+            .upload_data_to_resource(constants.len(), constants.as_ptr());
+
         let (
             per_tile_command_lists_pipeline_state,
             paint_pipeline_state,
@@ -514,7 +521,7 @@ impl GpuState {
             num_ptcl_tg_y,
 
             compute_descriptor_heap,
-            constants_buffer,
+            _constants_buffer: constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_atlas_texture_upload_buffer: intermediate_texture_upload_buffer,
@@ -535,6 +542,14 @@ impl GpuState {
             query_heap,
             timing_query_buffer,
             num_renders,
+
+            _constants: Constants {
+                max_scene_objects,
+                object_size,
+                tile_size: tile_side_length_in_pixels,
+                num_tiles_x,
+                num_tiles_y,
+            }
         };
 
         // wait for upload of any resources to gpu
@@ -1510,25 +1525,6 @@ impl GpuState {
         )
     }
 
-    unsafe fn upload_data_to_constants_buffer(
-        &mut self,
-        num_objects: u32,
-        object_size: u32,
-        tile_size: u32,
-        num_tiles_x: u32,
-        num_tiles_y: u32,
-    ) {
-        let constants = [
-            num_objects,
-            object_size,
-            tile_size,
-            num_tiles_x,
-            num_tiles_y,
-        ];
-        self.constants_buffer
-            .upload_data_to_resource(constants.len(), constants.as_ptr());
-    }
-
     unsafe fn upload_data_to_object_data_buffer(&mut self, object_data: Vec<u8>) {
         self.object_data_buffer
             .upload_data_to_resource(object_data.len(), object_data.as_ptr());
@@ -1542,23 +1538,9 @@ impl GpuState {
 
     pub unsafe fn upload_data(
         &mut self,
-        constants: Option<Constants>,
         object_data: Option<Vec<u8>>,
         atlas_bytes: Option<&[u8]>,
     ) {
-        match constants {
-            Some(c) => {
-                self.upload_data_to_constants_buffer(
-                    c.num_objects,
-                    c.object_size,
-                    c.tile_size,
-                    c.num_tiles_x,
-                    c.num_tiles_y,
-                );
-            }
-            None => {}
-        }
-
         match object_data {
             Some(bytes) => {
                 self.upload_data_to_object_data_buffer(bytes);
