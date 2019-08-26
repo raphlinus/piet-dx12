@@ -16,6 +16,6 @@ rand = "0.7.0"
 byteorder = "1.3.2"
 image = "0.22.0"
 font-rs = {git = "https://github.com/raphlinus/font-rs.git", branch = "master"}
-#piet = { version = "0.0.6", path = "../piet" }
-piet = {git = "https://github.com/linebender/piet.git", branch = "master"}
+piet = "0.0.6"
+#piet = {git = "https://github.com/linebender/piet.git", branch = "master"}
 kurbo = "0.5.1"
