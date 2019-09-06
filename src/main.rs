@@ -20,6 +20,7 @@ pub mod window;
 
 use std::os::windows::ffi::OsStrExt;
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use kurbo::{Affine, Point, Rect, Shape};
 use rand::Rng;
 use piet::{
@@ -500,11 +501,15 @@ fn main() {
             y1: wnd.get_height() as f64,
         };
 
+        let num_circles: u32 = 500;
+        let num_strings: u32 = 500;
+
         let num_renders: u32 = 1000;
         let atlas_width: u16 = 512;
         let atlas_height: u16 = 512;
         let tile_side_length_in_pixels: u32 = 16;
-        let max_scene_objects: u32 = 1000;
+        // longest possible text string is "very piet", which contains 8 non-whitespace glyphs
+        let max_objects_in_scene: u32 = num_circles + num_strings*8;
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
@@ -512,7 +517,7 @@ fn main() {
             String::from("paint_objects"),
             String::from("VSMain"),
             String::from("PSMain"),
-            max_scene_objects,
+            max_objects_in_scene,
             tile_side_length_in_pixels,
             32,
             1,
@@ -524,8 +529,8 @@ fn main() {
             num_renders,
         );
 
-        let scene_circles = generate_random_circles(500, screen_size);
-        let scene_text = generate_random_text(500, screen_size);
+        let scene_circles = generate_random_circles(num_circles, screen_size);
+        let scene_text = generate_random_text(num_strings, screen_size);
         //let scene_circles= Vec::<(kurbo::Circle, DX12Brush)>::new();
         //let scene_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
         //let scene_text = generate_test_text();
@@ -535,8 +540,12 @@ fn main() {
             let mut render_context = DX12RenderContext::new(atlas_width, atlas_height);
             populate_render_context(&mut render_context, &raw_font_generator, &scene_circles, &scene_text);
 
+            let num_objects_in_scene = u32::try_from(render_context.scene.objects.len()).expect("cannot store number of objects in scene as u32");
+            let object_data = render_context.scene.to_bytes();
+
             gpu_state.upload_data(
-                Some(render_context.scene.to_bytes()),
+                Some(num_objects_in_scene),
+                Some(object_data),
                 Some(&render_context.atlas.lock().expect("atlas is poisoned").bytes),
             );
 

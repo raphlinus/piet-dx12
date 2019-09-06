@@ -124,7 +124,6 @@ impl Atlas {
 
         let glyph_bitmap: Option<GlyphBitmap> = font.render_glyph(glyph_id, font_size);
 
-
         let glyph_top_offset = match &glyph_bitmap {
             Some(gb) => gb.top,
             None => 0,

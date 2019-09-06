@@ -6,22 +6,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-cbuffer Constants : register(b0)
+RWByteAddressBuffer per_tile_command_list: register(u0);
+
+cbuffer SceneConstants: register(b0) {
+    uint num_objects_in_scene;
+};
+cbuffer GpuStateConstants : register(b1)
 {
-	uint num_objects;
+    uint max_objects_in_scene;
 	uint object_size;
-	uint tile_size;
+	uint tile_side_length_in_pixels;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
-
-ByteAddressBuffer object_data_buffer : register(t0);
-RWByteAddressBuffer per_tile_command_list: register(u0);
 Texture2D<float> glyph_atlas : register(t1);
 RWTexture2D<float4> canvas : register(u1);
 
-#include "shaders/object_loaders.hlsl"
 #include "shaders/command_loaders.hlsl"
 #include "shaders/unpack.hlsl"
 
@@ -276,10 +277,10 @@ uint4 generate_tile_bbox(uint2 tile_coord) {
     uint tile_x_ix = tile_coord.x;
     uint tile_y_ix = tile_coord.y;
 
-    uint left = tile_size*tile_x_ix;
-    uint top = tile_size*tile_y_ix;
-    uint right = left + tile_size;
-    uint bot = top + tile_size;
+    uint left = tile_side_length_in_pixels*tile_x_ix;
+    uint top = tile_side_length_in_pixels*tile_y_ix;
+    uint right = left + tile_side_length_in_pixels;
+    uint bot = top + tile_side_length_in_pixels;
 
     uint4 result = {left, right, top, bot};
     return result;
@@ -294,7 +295,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
 
 
     uint linear_tile_ix = Gid.y*num_tiles_x + Gid.x;
-    uint size_of_command_list = 4 + num_objects*object_size;
+    uint size_of_command_list = 4 + max_objects_in_scene*object_size;
     uint num_commands_address = size_of_command_list*linear_tile_ix;
 
     uint this_tile_num_commands = per_tile_command_list.Load(num_commands_address);

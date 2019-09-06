@@ -6,16 +6,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-uint load_packed_object_specific_data_at_object_index(uint ix) {
-    uint data_address = ix*24;
+uint load_packed_object_specific_data_at_object_index(uint ix, uint object_size) {
+    uint data_address = ix*object_size;
 
     uint packed_data = object_data_buffer.Load(data_address);
 
     return packed_data;
 }
 
-uint2 load_packed_in_atlas_bbox_at_object_index(uint ix) {
-    uint x_address = ix*24 + 4;
+uint2 load_packed_in_atlas_bbox_at_object_index(uint ix, uint object_size) {
+    uint x_address = ix*object_size + 4;
     uint y_address = x_address + 4;
 
     uint packed_bbox_x = object_data_buffer.Load(x_address);
@@ -26,8 +26,8 @@ uint2 load_packed_in_atlas_bbox_at_object_index(uint ix) {
     return packed_bbox;
 }
 
-uint2 load_packed_in_scene_bbox_at_object_index(uint ix) {
-    uint x_address = ix*24 + 12;
+uint2 load_packed_in_scene_bbox_at_object_index(uint ix, uint object_size) {
+    uint x_address = ix*object_size + 12;
     uint y_address = x_address + 4;
 
     uint packed_bbox_x = object_data_buffer.Load(x_address);
@@ -38,8 +38,8 @@ uint2 load_packed_in_scene_bbox_at_object_index(uint ix) {
     return packed_bbox;
 }
 
-uint load_packed_color_at_object_index(uint ix) {
-    uint color_address = ix*24 + 20;
+uint load_packed_color_at_object_index(uint ix, uint object_size) {
+    uint color_address = ix*object_size + 20;
 
     uint packed_color = object_data_buffer.Load(color_address);
 

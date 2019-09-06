@@ -14,7 +14,7 @@ use crate::error;
 use crate::error::error_if_failed_else_unit;
 use std::convert::TryFrom;
 use std::{ffi, mem, path::Path, ptr};
-use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, minwindef, windef, winerror};
+use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, dxgitype, minwindef, windef, winerror};
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, d3dcompiler, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
@@ -791,6 +791,197 @@ impl Device {
         row_size_in_bytes.set_len(num_subresources);
 
         (layouts, num_rows, row_size_in_bytes, total_size)
+    }
+
+    pub unsafe fn create_uploadable_buffer(
+        &self,
+        descriptor_heap_offset: u32,
+        buffer_size_in_bytes: u64,
+    ) -> Resource {
+        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: buffer_size_in_bytes,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            ..mem::zeroed()
+        };
+
+        let buffer = self.create_committed_resource(
+            &heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &resource_description,
+            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            ptr::null(),
+            descriptor_heap_offset,
+        );
+
+        buffer
+    }
+
+    pub unsafe fn create_uploadable_byte_addressed_buffer(
+        &self,
+        descriptor_heap_offset: u32,
+        buffer_size_in_u32s: u32,
+    ) -> Resource {
+        let buffer_size_in_bytes = buffer_size_in_u32s as usize * mem::size_of::<u32>();
+
+        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: buffer_size_in_bytes as u64,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
+            ..mem::zeroed()
+        };
+
+        let byte_addressed_buffer = self.create_committed_resource(
+            &heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &resource_description,
+            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
+            ptr::null(),
+            descriptor_heap_offset,
+        );
+
+        byte_addressed_buffer
+    }
+
+    pub unsafe fn create_gpu_only_byte_addressed_buffer(
+        &self,
+        descriptor_heap_offset: u32,
+        buffer_size_in_u32s: u32,
+    ) -> Resource {
+        let size_of_u32_in_bytes = mem::size_of::<u32>();
+        let buffer_size_in_bytes = buffer_size_in_u32s as usize * size_of_u32_in_bytes;
+
+        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
+        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            //for GPU access only
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
+            Width: buffer_size_in_bytes as u64,
+            Height: 1,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            //essentially we're letting the adapter decide the layout
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+            ..mem::zeroed()
+        };
+
+        let buffer = self.create_committed_resource(
+            &heap_properties,
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &resource_description,
+            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            ptr::null(),
+            descriptor_heap_offset,
+        );
+
+        buffer
+    }
+
+    pub unsafe fn create_gpu_only_texture2d_buffer(
+        &self,
+        descriptor_heap_offset: u32,
+        width: u64,
+        height: u32,
+        format: dxgiformat::DXGI_FORMAT,
+        allow_unordered_access: bool,
+    ) -> Resource {
+        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
+            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            //TODO: what should MemoryPoolPreference flag be?
+            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
+            //we don't care about multi-adapter operation, so these next two will be zero
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+
+        let (flags, initial_resource_state) = {
+            if allow_unordered_access {
+                (d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                 d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+            } else {
+                (d3d12::D3D12_RESOURCE_FLAG_NONE,
+                 d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+            }
+        };
+
+        let resource_description = d3d12::D3D12_RESOURCE_DESC {
+            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            Width: width,
+            Height: height,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            Flags: flags,
+            Format: format,
+            ..mem::zeroed()
+        };
+
+        let buffer = self.create_committed_resource(
+            &heap_properties,
+            //TODO: is this heap flag ok?
+            d3d12::D3D12_HEAP_FLAG_NONE,
+            &resource_description,
+            initial_resource_state,
+            ptr::null(),
+            descriptor_heap_offset,
+        );
+
+        buffer
     }
 }
 

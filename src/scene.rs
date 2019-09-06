@@ -38,8 +38,13 @@ pub struct PlacedGlyph {
 
 impl GenericObject {
     pub fn size_in_u32s() -> u32 {
-        u32::try_from(mem::size_of::<GenericObject>() / mem::size_of::<u32>())
-            .expect("could not convert GenericObject size in u32s into u32 value")
+        let size_of_object_in_bytes = mem::size_of::<GenericObject>();
+        let size_of_u32_in_bytes = mem::size_of::<u32>();
+
+        // object should always have a size that is an integer number of u32s
+        assert_eq!(size_of_object_in_bytes % size_of_u32_in_bytes, 0);
+
+        u32::try_from(size_of_object_in_bytes / size_of_u32_in_bytes).expect("could not safely convert size of object in u32s into a u32 value")
     }
 
     pub fn size_in_bytes() -> usize {

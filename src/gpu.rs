@@ -10,7 +10,7 @@ extern crate kurbo;
 extern crate winapi;
 
 use crate::dx12;
-use crate::scene;
+use crate::scene::GenericObject;
 use crate::window;
 use kurbo::Rect;
 use std::convert::TryFrom;
@@ -207,35 +207,46 @@ fn average_f64s(input_data: &[f64]) -> f64 {
     return sum / num_elements;
 }
 
-pub enum PtclDescriptorRanges {
-    Constants,
-    Objects,
-    PerTileCommandLists,
-    Count,
-}
-
-pub enum PaintDescriptorRanges {
-    Constants,
-    Objects,
-    PerTileCommandLists,
-    AtlasTexture,
+pub enum Descriptors {
+    ObjectData,
+    Ptcls,
+    SceneConstants,
+    GpuStateConstants,
+    GlyphAtlas,
     Canvas,
-    Count,
 }
 
 // should match constants buffer as described in shaders
-pub struct Constants {
-    pub max_scene_objects: u32,
+pub struct SceneConstants {
+    pub num_objects_in_scene: u32,
+}
+
+impl SceneConstants {
+    pub fn num_constants() -> u8 {
+        1
+    }
+
+    pub fn as_array(&self) -> [u32; 1] {
+        [self.num_objects_in_scene]
+    }
+}
+
+// should match gpu state constants buffer as described in shaders
+pub struct GpuStateConstants {
+    pub max_objects_in_scene: u32,
     pub object_size: u32,
-    pub tile_size: u32,
+    pub tile_side_length_in_pixels: u32,
     pub num_tiles_x: u32,
     pub num_tiles_y: u32,
 }
 
-impl Constants {
-    pub fn determine_num_constants() -> u8 {
-        u8::try_from(mem::size_of::<Constants>() / mem::size_of::<u32>())
-            .expect("could not convert number of constants into u8 value")
+impl GpuStateConstants {
+    pub fn num_constants() -> u8 {
+        5
+    }
+
+    pub fn as_array(&self) -> [u32; 5] {
+        [self.max_objects_in_scene, self.object_size, self.tile_side_length_in_pixels, self.num_tiles_x, self.num_tiles_y]
     }
 }
 
@@ -262,7 +273,8 @@ pub struct GpuState {
     num_ptcl_tg_y: u32,
 
     compute_descriptor_heap: dx12::DescriptorHeap,
-    _constants_buffer: dx12::Resource,
+    scene_constants_buffer: dx12::Resource,
+    _gpu_state_constants_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
     intermediate_atlas_texture_upload_buffer: dx12::Resource,
@@ -284,7 +296,8 @@ pub struct GpuState {
     timing_query_buffer: dx12::Resource,
     num_renders: u32,
 
-    _constants: Constants,
+    scene_constants: SceneConstants,
+    _gpu_state_constants: GpuStateConstants,
 }
 
 impl GpuState {
@@ -294,7 +307,7 @@ impl GpuState {
         paint_entry: String,
         vertex_entry: String,
         fragment_entry: String,
-        max_scene_objects: u32,
+        max_objects_in_scene: u32,
         tile_side_length_in_pixels: u32,
         per_tile_command_lists_num_tiles_per_tg_x: u32,
         per_tile_command_lists_num_tiles_per_tg_y: u32,
@@ -434,16 +447,19 @@ impl GpuState {
             );
 
         let per_tile_command_lists_buffer_size_in_u32s =
-            (scene::GenericObject::size_in_u32s() * max_scene_objects + 1)
+            (GenericObject::size_in_u32s() * max_objects_in_scene + 1)
                 * num_tiles_x
                 * num_tiles_y;
-        let object_data_buffer_size_in_bytes =
-            max_scene_objects as u64 * scene::GenericObject::size_in_bytes() as u64;
-        let num_constants = Constants::determine_num_constants();
+        let object_data_buffer_size_in_u32s =
+            max_objects_in_scene * GenericObject::size_in_u32s();
+
+        let num_scene_constants = SceneConstants::num_constants();
+        let num_gpu_state_constants = GpuStateConstants::num_constants();
 
         let (
             compute_descriptor_heap,
-            constants_buffer,
+            scene_constants_buffer,
+            gpu_state_constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_texture_upload_buffer,
@@ -453,8 +469,9 @@ impl GpuState {
             paint_pipeline_root_signature,
         ) = GpuState::create_compute_pipeline_dependencies(
             device.clone(),
-            num_constants,
-            object_data_buffer_size_in_bytes,
+            num_scene_constants,
+            num_gpu_state_constants,
+            object_data_buffer_size_in_u32s,
             per_tile_command_lists_buffer_size_in_u32s,
             atlas_width,
             atlas_height,
@@ -463,10 +480,16 @@ impl GpuState {
             canvas_height as u32,
         );
 
-        let object_size = scene::GenericObject::size_in_bytes() as u32;
-        let constants = [max_scene_objects, object_size, tile_side_length_in_pixels, num_tiles_x, num_tiles_y];
-        constants_buffer
-            .upload_data_to_resource(constants.len(), constants.as_ptr());
+        let object_size = GenericObject::size_in_bytes() as u32;
+        let gpu_state_constants = GpuStateConstants {
+            max_objects_in_scene,
+            object_size,
+            tile_side_length_in_pixels,
+            num_tiles_x,
+            num_tiles_y,
+        };
+        let gpu_state_constants_array = gpu_state_constants.as_array();
+        gpu_state_constants_buffer.upload_data_to_resource(gpu_state_constants_array.len(), gpu_state_constants_array.as_ptr());
 
         let (
             per_tile_command_lists_pipeline_state,
@@ -521,7 +544,8 @@ impl GpuState {
             num_ptcl_tg_y,
 
             compute_descriptor_heap,
-            _constants_buffer: constants_buffer,
+            scene_constants_buffer,
+            _gpu_state_constants_buffer: gpu_state_constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_atlas_texture_upload_buffer: intermediate_texture_upload_buffer,
@@ -543,13 +567,11 @@ impl GpuState {
             timing_query_buffer,
             num_renders,
 
-            _constants: Constants {
-                max_scene_objects,
-                object_size,
-                tile_size: tile_side_length_in_pixels,
-                num_tiles_x,
-                num_tiles_y,
-            }
+            scene_constants: SceneConstants {
+                num_objects_in_scene: 0,
+            },
+
+            _gpu_state_constants: gpu_state_constants,
         };
 
         // wait for upload of any resources to gpu
@@ -980,329 +1002,6 @@ impl GpuState {
         )
     }
 
-    unsafe fn create_constants_buffer(
-        num_constants: u8,
-        device: dx12::Device,
-        descriptor_heap: dx12::DescriptorHeap,
-        descriptor_heap_offset: u32,
-    ) -> dx12::Resource {
-        if num_constants > 8 {
-            panic!("not designed to handle more than 8 constants");
-        }
-        // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
-        let padded_size_in_bytes: u64 = 256;
-        let constants_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: padded_size_in_bytes as u64,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
-            ..mem::zeroed()
-        };
-        let constants_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let constants_buffer = device.create_committed_resource(
-            &constants_buffer_heap_properties,
-            //TODO: is this heap flag ok?
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &constants_buffer_resource_description,
-            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
-            ptr::null(),
-            descriptor_heap_offset,
-        );
-        println!("creating constants buffer...");
-        device.create_constant_buffer_view(
-            constants_buffer.clone(),
-            descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(constants_buffer.descriptor_heap_offset),
-            u32::try_from(padded_size_in_bytes)
-                .expect("could not safely convert padded_size_in_bytes to u32"),
-        );
-
-        constants_buffer
-    }
-
-    unsafe fn create_object_data_buffer(
-        object_data_buffer_size_in_bytes: u64,
-        device: dx12::Device,
-        descriptor_heap: dx12::DescriptorHeap,
-        descriptor_heap_offset: u32,
-    ) -> dx12::Resource {
-        let size_of_u32 = mem::size_of::<u32>();
-        let object_data_buffer_size_in_u32s = {
-            let s = size_of_u32 as f64;
-            let o = object_data_buffer_size_in_bytes as f64;
-
-            (o / s).ceil() as u32
-        };
-
-        let object_data_buffer_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let object_data_buffer_resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: object_data_buffer_size_in_bytes,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
-            ..mem::zeroed()
-        };
-        let object_data_buffer = device.create_committed_resource(
-            &object_data_buffer_heap_properties,
-            //TODO: is this heap flag ok?
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &object_data_buffer_resource_description,
-            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
-            ptr::null(),
-            descriptor_heap_offset,
-        );
-        println!("creating object data buffer...");
-        device.create_byte_addressed_buffer_shader_resource_view(
-            object_data_buffer.clone(),
-            descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(object_data_buffer.descriptor_heap_offset),
-            0,
-            object_data_buffer_size_in_u32s,
-        );
-
-        object_data_buffer
-    }
-
-    unsafe fn create_per_tile_command_lists_buffer(
-        device: dx12::Device,
-        descriptor_heap: dx12::DescriptorHeap,
-        per_tile_command_list_buffer_size_in_u32s: u32,
-        descriptor_heap_offset: u32,
-    ) -> dx12::Resource {
-        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
-        let per_tile_command_list_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let per_tile_command_list_buffer_size =
-            (mem::size_of::<u32>() as u64) * (per_tile_command_list_buffer_size_in_u32s as u64);
-        assert!(
-            per_tile_command_list_buffer_size < (std::u32::MAX as u64),
-            "per_tile_command_list_buffer_size >= std::u32::MAX!"
-        );
-        let per_tile_command_list_resource_desc = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: per_tile_command_list_buffer_size,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            //essentially we're letting the adapter decide the layout
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-            ..mem::zeroed()
-        };
-        let per_tile_command_lists_buffer = device.create_committed_resource(
-            &per_tile_command_list_heap_properties,
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &per_tile_command_list_resource_desc,
-            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            ptr::null(),
-            descriptor_heap_offset,
-        );
-        println!("creating per tile command lists buffer...");
-        //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
-        device.create_byte_addressed_buffer_unordered_access_view(
-            per_tile_command_lists_buffer.clone(),
-            descriptor_heap.get_cpu_descriptor_handle_at_offset(
-                per_tile_command_lists_buffer.descriptor_heap_offset,
-            ),
-            0,
-            per_tile_command_list_buffer_size_in_u32s,
-        );
-
-        per_tile_command_lists_buffer
-    }
-
-    unsafe fn create_intermediate_texture_upload_buffer(
-        device: dx12::Device,
-        size_in_bytes: u64,
-        descriptor_heap_offset: u32,
-    ) -> dx12::Resource {
-        let heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            Type: d3d12::D3D12_HEAP_TYPE_UPLOAD,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_BUFFER,
-            Width: size_in_bytes,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
-            ..mem::zeroed()
-        };
-        println!("creating intermediate texture uplaod buffer...");
-        let intermediate_texture_upload_buffer = device.create_committed_resource(
-            &heap_properties,
-            //TODO: is this heap flag ok?
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &resource_description,
-            d3d12::D3D12_RESOURCE_STATE_GENERIC_READ,
-            ptr::null(),
-            descriptor_heap_offset,
-        );
-
-        intermediate_texture_upload_buffer
-    }
-
-    unsafe fn create_atlas_texture(
-        atlas_width: u64,
-        atlas_height: u32,
-        device: dx12::Device,
-        descriptor_heap: dx12::DescriptorHeap,
-        descriptor_heap_offset: u32,
-    ) -> dx12::Resource {
-        let atlas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let atlas_resource_description = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-            Width: atlas_width,
-            Height: atlas_height,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_NONE,
-            Format: dxgiformat::DXGI_FORMAT_R8_UNORM,
-            ..mem::zeroed()
-        };
-        println!("creating atlas texture buffer...");
-        let atlas_texture = device.create_committed_resource(
-            &atlas_heap_properties,
-            //TODO: is this heap flag ok?
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &atlas_resource_description,
-            d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-            ptr::null(),
-            descriptor_heap_offset,
-        );
-        device.create_texture2d_shader_resource_view(
-            atlas_texture.clone(),
-            dxgiformat::DXGI_FORMAT_R8_UNORM,
-            descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(atlas_texture.descriptor_heap_offset),
-        );
-
-        atlas_texture
-    }
-
-    unsafe fn create_canvas_texture(
-        device: dx12::Device,
-        descriptor_heap: dx12::DescriptorHeap,
-        width: u64,
-        height: u32,
-        descriptor_heap_offset: u32,
-    ) -> dx12::Resource {
-        //TODO: consider flag D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS?
-        let canvas_heap_properties = d3d12::D3D12_HEAP_PROPERTIES {
-            //for GPU access only
-            Type: d3d12::D3D12_HEAP_TYPE_DEFAULT,
-            CPUPageProperty: d3d12::D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            //TODO: what should MemoryPoolPreference flag be?
-            MemoryPoolPreference: d3d12::D3D12_MEMORY_POOL_UNKNOWN,
-            //we don't care about multi-adapter operation, so these next two will be zero
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
-        let canvas_resource_desc = d3d12::D3D12_RESOURCE_DESC {
-            Dimension: d3d12::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-            //TODO: what alignment should be chosen?
-            Alignment: 0,
-            Width: width,
-            Height: height,
-            DepthOrArraySize: 1,
-            //TODO: what should MipLevels be?
-            MipLevels: 1,
-            Format: winapi::shared::dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
-            SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            //essentially we're letting the adapter decide the layout
-            Layout: d3d12::D3D12_TEXTURE_LAYOUT_UNKNOWN,
-            Flags: d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-        };
-        let mut clear_value: d3d12::D3D12_CLEAR_VALUE = mem::zeroed();
-        *clear_value.u.Color_mut() = [0.0, 0.0, 0.0, 0.0];
-        println!("creating canvas texture buffer...");
-        let canvas_texture = device.create_committed_resource(
-            &canvas_heap_properties,
-            d3d12::D3D12_HEAP_FLAG_NONE,
-            &canvas_resource_desc,
-            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            ptr::null(),
-            descriptor_heap_offset,
-        );
-        device.create_unordered_access_view(
-            canvas_texture.clone(),
-            descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(canvas_texture.descriptor_heap_offset),
-        );
-
-        canvas_texture
-    }
-
     unsafe fn create_compute_root_signature_from_descriptor_ranges(
         device: dx12::Device,
         descriptor_ranges: &[d3d12::D3D12_DESCRIPTOR_RANGE],
@@ -1335,8 +1034,9 @@ impl GpuState {
 
     unsafe fn create_compute_pipeline_dependencies(
         device: dx12::Device,
-        num_constants: u8,
-        object_data_buffer_size_in_bytes: u64,
+        num_scene_constants: u8,
+        num_gpu_state_constants: u8,
+        object_data_buffer_size_in_u32s: u32,
         per_tile_command_list_buffer_size_in_u32s: u32,
         atlas_width: u64,
         atlas_height: u32,
@@ -1351,161 +1051,184 @@ impl GpuState {
         dx12::Resource,
         dx12::Resource,
         dx12::Resource,
+        dx12::Resource,
         dx12::RootSignature,
         dx12::RootSignature,
     ) {
         // create compute resource descriptor heap
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: 6,
+            NumDescriptors: 7,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
-        let mut descriptor_heap_offset = 0;
-
-        // create constants buffer
-        let constants_buffer = {
-            GpuState::create_constants_buffer(
-                num_constants,
-                device.clone(),
-                compute_descriptor_heap.clone(),
-                descriptor_heap_offset,
-            )
-        };
-        descriptor_heap_offset += 1;
+        let mut descriptor_heap_offset: u32 = 0;
 
         // create object data buffer
-        let object_data_buffer = GpuState::create_object_data_buffer(
-            object_data_buffer_size_in_bytes,
-            device.clone(),
-            compute_descriptor_heap.clone(),
-            descriptor_heap_offset,
+        let object_data_buffer = device.create_uploadable_byte_addressed_buffer(
+            Descriptors::ObjectData as u32,
+            object_data_buffer_size_in_u32s,
         );
-        descriptor_heap_offset += 1;
+        device.create_byte_addressed_buffer_shader_resource_view(
+            object_data_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(object_data_buffer.descriptor_heap_offset),
+            0,
+            object_data_buffer_size_in_u32s,
+        );
 
         // create per tile command list resource
-        let ptcl_buffer = GpuState::create_per_tile_command_lists_buffer(
-            device.clone(),
-            compute_descriptor_heap.clone(),
+        let ptcl_buffer = device.create_gpu_only_byte_addressed_buffer(
+            Descriptors::Ptcls as u32,
             per_tile_command_list_buffer_size_in_u32s,
-            descriptor_heap_offset,
         );
-        descriptor_heap_offset += 1;
+        //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
+        device.create_byte_addressed_buffer_unordered_access_view(
+            ptcl_buffer.clone(),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
+                ptcl_buffer.descriptor_heap_offset,
+            ),
+            0,
+            per_tile_command_list_buffer_size_in_u32s,
+        );
+
+        // create scene constants buffer
+        if num_scene_constants > 8 {
+            panic!("not designed to handle more than 8 scene constants");
+        }
+        let padded_size_in_bytes: u32 = 256;
+        let scene_constants_buffer =
+            device.create_uploadable_buffer(
+                Descriptors::SceneConstants as u32,
+                padded_size_in_bytes as u64,
+            );
+        // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
+        device.create_constant_buffer_view(
+            scene_constants_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(scene_constants_buffer.descriptor_heap_offset),
+            padded_size_in_bytes,
+        );
+
+        // create gpu state constants buffer
+        if num_gpu_state_constants > 8 {
+            panic!("not designed to handle more than 8 gpu state constants");
+        }
+        let padded_size_in_bytes: u32 = 256;
+        let gpu_state_constants_buffer =
+            device.create_uploadable_buffer(
+                Descriptors::GpuStateConstants as u32,
+                padded_size_in_bytes as u64,
+            );
+        // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
+        device.create_constant_buffer_view(
+            gpu_state_constants_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(gpu_state_constants_buffer.descriptor_heap_offset),
+            padded_size_in_bytes,
+        );
 
         // create atlas texture
-        let atlas_texture = GpuState::create_atlas_texture(
+        let atlas_format = dxgiformat::DXGI_FORMAT_R8_UNORM;
+        let atlas_texture = device.create_gpu_only_texture2d_buffer(
+            Descriptors::GlyphAtlas as u32,
             atlas_width,
             atlas_height,
-            device.clone(),
-            compute_descriptor_heap.clone(),
-            descriptor_heap_offset,
+            atlas_format,
+            false,
+        );
+        device.create_texture2d_shader_resource_view(
+            atlas_texture.clone(),
+            atlas_format,
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(atlas_texture.descriptor_heap_offset),
         );
         descriptor_heap_offset += 1;
 
-        // create intermediate target resource
-        let canvas_texture = GpuState::create_canvas_texture(
-            device.clone(),
-            compute_descriptor_heap.clone(),
+        // create canvas resource
+        let canvas_format = dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM;
+        let canvas_texture = device.create_gpu_only_texture2d_buffer(
+            Descriptors::Canvas as u32,
             canvas_width,
             canvas_height,
-            descriptor_heap_offset,
+            canvas_format,
+            true,
+        );
+        device.create_unordered_access_view(
+            canvas_texture.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(canvas_texture.descriptor_heap_offset),
         );
         descriptor_heap_offset += 1;
 
         // create intermediate atlas texture upload buffer
         let intermediate_texture_upload_buffer =
-            GpuState::create_intermediate_texture_upload_buffer(
-                device.clone(),
-                atlas_size_in_bytes,
+            device.create_uploadable_buffer(
                 descriptor_heap_offset,
+                atlas_size_in_bytes,
             );
         // this does not need to be shader visible, so we don't need a descriptor range for it
         // important to put it at the end of the descriptor heap, so that descriptor heap offsets
         // and descriptor table offsets match
 
-        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PtclDescriptorRanges::Constants as u32,
-            ..mem::zeroed()
-        };
         let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PtclDescriptorRanges::Objects as u32,
-            ..mem::zeroed()
-        };
-        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PtclDescriptorRanges::PerTileCommandLists as u32,
+            OffsetInDescriptorsFromTableStart: Descriptors::ObjectData as u32,
             BaseShaderRegister: 0,
             ..mem::zeroed()
         };
+        let ptcls_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::Ptcls as u32,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
+        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+            NumDescriptors: 2,
+            OffsetInDescriptorsFromTableStart: Descriptors::SceneConstants as u32,
+            BaseShaderRegister: 0,
+            ..mem::zeroed()
+        };
+        let glyph_atlas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::GlyphAtlas as u32,
+            BaseShaderRegister:1,
+            ..mem::zeroed()
+        };
+        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::Canvas as u32,
+            BaseShaderRegister: 1,
+            ..mem::zeroed()
+        };
+
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
-                constants_descriptor_range,
                 objects_descriptor_range,
-                per_tile_command_lists_descriptor_range,
+                ptcls_descriptor_range,
+                constants_descriptor_range,
             ];
-            assert_eq!(
-                per_tile_command_lists_descriptor_ranges.len(),
-                PtclDescriptorRanges::Count as usize
-            );
+
             GpuState::create_compute_root_signature_from_descriptor_ranges(
                 device.clone(),
                 &per_tile_command_lists_descriptor_ranges,
             )
         };
 
-        let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::Constants as u32,
-            BaseShaderRegister: 0,
-            ..mem::zeroed()
-        };
-        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::Objects as u32,
-            BaseShaderRegister: 0,
-            ..mem::zeroed()
-        };
-        let per_tile_command_lists_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::PerTileCommandLists as u32,
-            BaseShaderRegister: 0,
-            ..mem::zeroed()
-        };
-        let atlas_texture_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::AtlasTexture as u32,
-            BaseShaderRegister: 1,
-            ..mem::zeroed()
-        };
-        let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
-            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
-            NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: PaintDescriptorRanges::Canvas as u32,
-            BaseShaderRegister: 1,
-            ..mem::zeroed()
-        };
         let paint_pipeline_root_signature = {
             let paint_descriptor_ranges = [
+                ptcls_descriptor_range,
                 constants_descriptor_range,
-                objects_descriptor_range,
-                per_tile_command_lists_descriptor_range,
-                atlas_texture_descriptor_range,
+                glyph_atlas_descriptor_range,
                 canvas_descriptor_range,
             ];
-            assert_eq!(
-                paint_descriptor_ranges.len(),
-                PaintDescriptorRanges::Count as usize
-            );
+
             GpuState::create_compute_root_signature_from_descriptor_ranges(
                 device.clone(),
                 &paint_descriptor_ranges,
@@ -1514,7 +1237,8 @@ impl GpuState {
 
         (
             compute_descriptor_heap,
-            constants_buffer,
+            scene_constants_buffer,
+            gpu_state_constants_buffer,
             object_data_buffer,
             ptcl_buffer,
             intermediate_texture_upload_buffer,
@@ -1525,32 +1249,34 @@ impl GpuState {
         )
     }
 
-    unsafe fn upload_data_to_object_data_buffer(&mut self, object_data: Vec<u8>) {
-        self.object_data_buffer
-            .upload_data_to_resource(object_data.len(), object_data.as_ptr());
-    }
-
-    unsafe fn upload_atlas_texture_data_to_intermediate_buffer(&mut self, texture_data: &[u8]) {
-        self.intermediate_atlas_texture_upload_buffer
-            .upload_data_to_resource(texture_data.len(), texture_data.as_ptr());
-        self.atlas_texture_data_uploaded = false;
-    }
-
     pub unsafe fn upload_data(
         &mut self,
+        num_objects_in_scene: Option<u32>,
         object_data: Option<Vec<u8>>,
         atlas_bytes: Option<&[u8]>,
     ) {
+        match num_objects_in_scene {
+            Some(n) => {
+                self.scene_constants.num_objects_in_scene = n;
+                let scene_constants_array = self.scene_constants.as_array();
+                self.scene_constants_buffer.upload_data_to_resource(scene_constants_array.len(), scene_constants_array.as_ptr());
+            },
+            None => {}
+        }
+
         match object_data {
             Some(bytes) => {
-                self.upload_data_to_object_data_buffer(bytes);
+                self.object_data_buffer
+                    .upload_data_to_resource(bytes.len(), bytes.as_ptr());
             }
             None => {}
         }
 
         match atlas_bytes {
             Some(bytes) => {
-                self.upload_atlas_texture_data_to_intermediate_buffer(bytes);
+                self.intermediate_atlas_texture_upload_buffer
+                    .upload_data_to_resource(bytes.len(), bytes.as_ptr());
+                self.atlas_texture_data_uploaded = false;
             }
             None => {}
         }
