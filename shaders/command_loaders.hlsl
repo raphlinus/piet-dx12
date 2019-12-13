@@ -6,16 +6,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-uint load_packed_object_specific_data_from_cmd(uint command_address) {
-    uint data_address = command_address;
-
+uint load_packed_general_data_from_cmd(uint data_address) {
     uint packed_data = per_tile_command_list.Load(data_address);
 
     return packed_data;
 }
 
-uint2 load_packed_in_atlas_bbox_from_cmd(uint command_address) {
-    uint x_address = command_address + 4;
+uint2 load_packed_in_scene_bbox_from_cmd(uint data_address) {
+    uint x_address = data_address;
     uint y_address = x_address + 4;
 
     uint packed_bbox_x = per_tile_command_list.Load(x_address);
@@ -26,8 +24,8 @@ uint2 load_packed_in_atlas_bbox_from_cmd(uint command_address) {
     return packed_bbox;
 }
 
-uint2 load_packed_in_scene_bbox_from_cmd(uint command_address) {
-    uint x_address = command_address + 12;
+uint2 load_packed_in_atlas_bbox_from_cmd(uint data_address) {
+    uint x_address = data_address;
     uint y_address = x_address + 4;
 
     uint packed_bbox_x = per_tile_command_list.Load(x_address);
@@ -38,11 +36,8 @@ uint2 load_packed_in_scene_bbox_from_cmd(uint command_address) {
     return packed_bbox;
 }
 
-uint load_packed_color_from_cmd(uint command_address) {
-    uint color_address = command_address + 20;
-
-    uint packed_color = per_tile_command_list.Load(color_address);
+uint load_packed_color_from_cmd(uint data_address) {
+    uint packed_color = per_tile_command_list.Load(data_address);
 
     return packed_color;
 }
-

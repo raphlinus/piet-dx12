@@ -10,11 +10,11 @@ extern crate font_rs;
 extern crate image;
 use crate::dx12;
 
+use font_rs::font::{Font as RawFont, GlyphBitmap};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
-use font_rs::font::{Font as RawFont, GlyphBitmap};
 
 #[derive(Clone, Copy)]
 pub struct AtlasCursor {

@@ -6,10 +6,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+extern crate font_rs;
 extern crate kurbo;
 extern crate piet;
 extern crate rand;
-extern crate font_rs;
 
 pub mod atlas;
 pub mod dx12;
@@ -18,23 +18,23 @@ pub mod gpu;
 pub mod scene;
 pub mod window;
 
-use std::os::windows::ffi::OsStrExt;
-use std::borrow::Cow;
-use std::convert::TryFrom;
+use atlas::Atlas;
+use font_rs::font::{parse, Font as RawFont};
 use kurbo::{Affine, Point, Rect, Shape};
-use rand::Rng;
 use piet::{
     Color, Error, FixedGradient, Font, FontBuilder, ImageFormat, InterpolationMode, IntoBrush,
     RenderContext, StrokeStyle, Text, TextLayout, TextLayoutBuilder,
 };
-use font_rs::font::{parse, Font as RawFont};
-use std::path::PathBuf;
-use std::fs::File;
-use std::io::Read;
-use std::sync::{Arc, Mutex};
+use rand::Rng;
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::convert::TryFrom;
+use std::fs::File;
 use std::hash::Hash;
-use atlas::Atlas;
+use std::io::Read;
+use std::os::windows::ffi::OsStrExt;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct ColorValue {
@@ -110,7 +110,10 @@ impl DX12RenderContext {
     pub unsafe fn new(atlas_width: u16, atlas_height: u16) -> DX12RenderContext {
         DX12RenderContext {
             scene: scene::Scene::new_empty(),
-            atlas: Arc::new(Mutex::new(Atlas::create_empty_atlas(atlas_width, atlas_height))),
+            atlas: Arc::new(Mutex::new(Atlas::create_empty_atlas(
+                atlas_width,
+                atlas_height,
+            ))),
             inner_text: DX12Text,
         }
     }
@@ -205,7 +208,12 @@ impl RenderContext for DX12RenderContext {
 
         match brush {
             DX12Brush::Solid(cv) => {
-                self.scene.add_text(pos.x as u16, pos.y as u16, &layout.placed_glyphs, cv.color_u8s);
+                self.scene.add_text(
+                    pos.x as u16,
+                    pos.y as u16,
+                    &layout.placed_glyphs,
+                    cv.color_u8s,
+                );
             }
             _ => {}
         }
@@ -291,7 +299,7 @@ impl TextLayoutBuilder for DX12TextLayoutBuilder {
             result
         };
 
-        let mut atlas = self.atlas.lock().expect("unable to safely get atlas data");;
+        let mut atlas = self.atlas.lock().expect("unable to safely get atlas data");
 
         for &gc in glyph_chars.iter() {
             let raw_font = self.raw_font_generator.generate_raw_font();
@@ -344,16 +352,24 @@ impl TextLayoutBuilder for DX12TextLayoutBuilder {
             }
         }
 
-        Ok(DX12TextLayout {
-            placed_glyphs,
-        })
+        Ok(DX12TextLayout { placed_glyphs })
     }
 }
 
 impl TextLayout for DX12TextLayout {
     fn width(&self) -> f64 {
-        let x0 = self.placed_glyphs.iter().map(|pg| pg.placed_bbox.x0).min_by(|a, b| a.partial_cmp(b).expect("could not compare some x0 values")).unwrap_or(0.0);
-        let x1 = self.placed_glyphs.iter().map(|pg| pg.placed_bbox.x0).min_by(|a, b| a.partial_cmp(b).expect("could not compare some x0 values")).unwrap_or(0.0);
+        let x0 = self
+            .placed_glyphs
+            .iter()
+            .map(|pg| pg.placed_bbox.x0)
+            .min_by(|a, b| a.partial_cmp(b).expect("could not compare some x0 values"))
+            .unwrap_or(0.0);
+        let x1 = self
+            .placed_glyphs
+            .iter()
+            .map(|pg| pg.placed_bbox.x0)
+            .min_by(|a, b| a.partial_cmp(b).expect("could not compare some x0 values"))
+            .unwrap_or(0.0);
 
         (x1 - x0)
     }
@@ -377,10 +393,32 @@ pub fn win32_string(value: &str) -> Vec<u16> {
 }
 
 #[allow(dead_code)]
-fn generate_random_circles(
-    num_circles: u32,
-    screen_size: Rect,
-) -> Vec<(kurbo::Circle, DX12Brush)> {
+fn generate_test_circle() -> Vec<(kurbo::Circle, DX12Brush)> {
+    let mut circles = Vec::<(kurbo::Circle, DX12Brush)>::new();
+
+    for _ in 0..1 {
+        let circle = kurbo::Circle {
+            center: kurbo::Point {
+                x: 100.0,
+                y: 100.0,
+            },
+            radius: 50.0,
+        };
+
+        let color_u8s: [u8; 4] = [255; 4];
+        let brush = DX12Brush::Solid(ColorValue {
+            color_u32: 0,
+            color_u8s,
+        });
+
+        circles.push((circle, brush));
+    }
+
+    circles
+} 
+
+#[allow(dead_code)]
+fn generate_random_circles(num_circles: u32, screen_size: Rect) -> Vec<(kurbo::Circle, DX12Brush)> {
     let mut rng = rand::thread_rng();
 
     let mut random_circles = Vec::<(kurbo::Circle, DX12Brush)>::new();
@@ -415,7 +453,10 @@ fn generate_random_text(
     screen_size: Rect,
 ) -> Vec<(String, kurbo::Point, u32, DX12Brush)> {
     let mut rng = rand::thread_rng();
-    let possible_strings = ["wow", "so fast", "much fps", "very piet"].iter().map(|&s| String::from(s)).collect::<Vec<String>>();
+    let possible_strings = ["wow", "so fast", "much fps", "very piet"]
+        .iter()
+        .map(|&s| String::from(s))
+        .collect::<Vec<String>>();
     let possible_font_sizes: [u32; 4] = [12, 24, 36, 48];
     let mut random_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
     for _ in 0..num_strings {
@@ -447,17 +488,14 @@ fn generate_random_text(
 }
 
 #[allow(dead_code)]
-fn generate_test_text () -> Vec<(String, kurbo::Point, u32, DX12Brush)> {
+fn generate_test_text() -> Vec<(String, kurbo::Point, u32, DX12Brush)> {
     let mut text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
 
     let test_string = String::from(" ");
 
     let font_size = 50;
 
-    let pos = kurbo::Point {
-        x: 400.0,
-        y: 400.0,
-    };
+    let pos = kurbo::Point { x: 400.0, y: 400.0 };
 
     let mut color_u8s: [u8; 4] = [0; 4];
     for i in 0..4 {
@@ -473,7 +511,12 @@ fn generate_test_text () -> Vec<(String, kurbo::Point, u32, DX12Brush)> {
     text
 }
 
-fn populate_render_context(render_context: &mut DX12RenderContext, raw_font_generator: &Arc<RawFontGenerator>, scene_circles: &[(kurbo::Circle, DX12Brush)], scene_text: &[(String, kurbo::Point, u32, DX12Brush)]) {
+fn populate_render_context(
+    render_context: &mut DX12RenderContext,
+    raw_font_generator: &Arc<RawFontGenerator>,
+    scene_circles: &[(kurbo::Circle, DX12Brush)],
+    scene_text: &[(String, kurbo::Point, u32, DX12Brush)],
+) {
     for (circle, brush) in scene_circles.iter() {
         render_context.fill(circle, brush);
     }
@@ -509,7 +552,7 @@ fn main() {
         let atlas_height: u16 = 512;
         let tile_side_length_in_pixels: u32 = 16;
         // longest possible text string is "very piet", which contains 8 non-whitespace glyphs
-        let max_objects_in_scene: u32 = num_circles + num_strings*8;
+        let max_objects_in_scene: u32 = num_circles + num_strings * 8;
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
@@ -538,15 +581,27 @@ fn main() {
 
         for i in 0..num_renders {
             let mut render_context = DX12RenderContext::new(atlas_width, atlas_height);
-            populate_render_context(&mut render_context, &raw_font_generator, &scene_circles, &scene_text);
+            populate_render_context(
+                &mut render_context,
+                &raw_font_generator,
+                &scene_circles,
+                &scene_text,
+            );
 
-            let num_objects_in_scene = u32::try_from(render_context.scene.objects.len()).expect("cannot store number of objects in scene as u32");
+            let num_objects_in_scene = u32::try_from(render_context.scene.objects.len())
+                .expect("cannot store number of objects in scene as u32");
             let object_data = render_context.scene.to_bytes();
 
             gpu_state.upload_data(
                 Some(num_objects_in_scene),
                 Some(object_data),
-                Some(&render_context.atlas.lock().expect("atlas is poisoned").bytes),
+                Some(
+                    &render_context
+                        .atlas
+                        .lock()
+                        .expect("atlas is poisoned")
+                        .bytes,
+                ),
             );
 
             gpu_state.render(i);

@@ -38,7 +38,7 @@ uint4 extract_u8s_from_uint(uint input_value) {
     return result;
 }
 
-uint2 unpack_object_specific_data(uint packed_data) {
+uint2 unpack_general_data(uint packed_data) {
     uint2 unpacked_data = extract_ushort2_from_uint(packed_data);
 
     return unpacked_data;

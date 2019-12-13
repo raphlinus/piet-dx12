@@ -44,7 +44,8 @@ impl GenericObject {
         // object should always have a size that is an integer number of u32s
         assert_eq!(size_of_object_in_bytes % size_of_u32_in_bytes, 0);
 
-        u32::try_from(size_of_object_in_bytes / size_of_u32_in_bytes).expect("could not safely convert size of object in u32s into a u32 value")
+        u32::try_from(size_of_object_in_bytes / size_of_u32_in_bytes)
+            .expect("could not safely convert size of object in u32s into a u32 value")
     }
 
     pub fn size_in_bytes() -> usize {
@@ -59,61 +60,73 @@ pub struct Scene {
 impl Scene {
     pub fn new_empty() -> Scene {
         Scene {
-            objects: Vec::new()
+            objects: Vec::new(),
         }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut scene_in_bytes = Vec::<u8>::new();
+        let mut general_data_in_bytes = Vec::<u8>::new();
+        let mut in_scene_bbox_data_in_bytes = Vec::<u8>::new();
+        let mut in_atlas_bbox_data_in_bytes = Vec::<u8>::new();
+        let mut color_data_in_bytes = Vec::<u8>::new();
 
         for object in self.objects.iter() {
             // glyph_id
-            scene_in_bytes
+            general_data_in_bytes
                 .write_u16::<LittleEndian>(object.glyph_id)
                 .expect("could not convert u16 to bytes");
             // object_type
-            scene_in_bytes
+            general_data_in_bytes
                 .write_u16::<LittleEndian>(object.object_type as u16)
                 .expect("could not convert u16 to bytes");
 
+            // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
+            // scene_bbox_x_max
+            in_scene_bbox_data_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.1)
+                .expect("could not convert u16 to bytes");
+            // scene_bbox_x_min
+            in_scene_bbox_data_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.0)
+                .expect("could not convert u16 to bytes");
+
+            // scene_bbox_y_max
+            in_scene_bbox_data_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.3)
+                .expect("could not convert u16 to bytes");
+            // scene_bbox_y_min
+            in_scene_bbox_data_in_bytes
+                .write_u16::<LittleEndian>(object.in_scene_bbox.2)
+                .expect("could not convert u16 to bytes");
+
             // atlas_bbox_x_max
-            scene_in_bytes
+            in_atlas_bbox_data_in_bytes
                 .write_u16::<LittleEndian>(object.in_atlas_bbox.1)
                 .expect("could not convert u16 to bytes");
             // atlas_bbox_x_min
-            scene_in_bytes
+            in_atlas_bbox_data_in_bytes
                 .write_u16::<LittleEndian>(object.in_atlas_bbox.0)
                 .expect("could not convert u16 to bytes");
 
             // atlas_bbox_y_max
-            scene_in_bytes
+            in_atlas_bbox_data_in_bytes
                 .write_u16::<LittleEndian>(object.in_atlas_bbox.3)
                 .expect("could not convert u16 to bytes");
             // atlas_bbox_y_min
-            scene_in_bytes
+            in_atlas_bbox_data_in_bytes
                 .write_u16::<LittleEndian>(object.in_atlas_bbox.2)
                 .expect("could not convert u16 to bytes");
 
-            // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-            scene_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.1)
-                .expect("could not convert u16 to bytes");
-            scene_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.0)
-                .expect("could not convert u16 to bytes");
-
-            // reverse order of each 4 bytes, so write component 2 first in LE, then component 1 in LE
-            scene_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.3)
-                .expect("could not convert u16 to bytes");
-            scene_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.2)
-                .expect("could not convert u16 to bytes");
-
             for component in object.color.iter().rev() {
-                scene_in_bytes.push(*component);
+                color_data_in_bytes.push(*component);
             }
         }
+
+        let mut scene_in_bytes = Vec::<u8>::new();
+        scene_in_bytes.append(&mut general_data_in_bytes);
+        scene_in_bytes.append(&mut in_scene_bbox_data_in_bytes);
+        scene_in_bytes.append(&mut in_atlas_bbox_data_in_bytes);
+        scene_in_bytes.append(&mut color_data_in_bytes);
 
         scene_in_bytes
     }

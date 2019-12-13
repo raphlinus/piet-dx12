@@ -10,6 +10,7 @@ extern crate kurbo;
 extern crate winapi;
 
 use crate::dx12;
+use crate::error;
 use crate::scene::GenericObject;
 use crate::window;
 use kurbo::Rect;
@@ -212,6 +213,7 @@ pub enum Descriptors {
     Ptcls,
     SceneConstants,
     GpuStateConstants,
+    DataSpecificationConstants,
     GlyphAtlas,
     Canvas,
 }
@@ -234,7 +236,6 @@ impl SceneConstants {
 // should match gpu state constants buffer as described in shaders
 pub struct GpuStateConstants {
     pub max_objects_in_scene: u32,
-    pub object_size: u32,
     pub tile_side_length_in_pixels: u32,
     pub num_tiles_x: u32,
     pub num_tiles_y: u32,
@@ -242,11 +243,70 @@ pub struct GpuStateConstants {
 
 impl GpuStateConstants {
     pub fn num_constants() -> u8 {
-        5
+        4
     }
 
-    pub fn as_array(&self) -> [u32; 5] {
-        [self.max_objects_in_scene, self.object_size, self.tile_side_length_in_pixels, self.num_tiles_x, self.num_tiles_y]
+    pub fn as_array(&self) -> [u32; 4] {
+        [
+            self.max_objects_in_scene,
+            self.tile_side_length_in_pixels,
+            self.num_tiles_x,
+            self.num_tiles_y,
+        ]
+    }
+}
+
+pub struct DataSpecificationConstants {
+    pub object_size: u32,
+    pub init_in_scene_bbox_address: u32,
+    pub init_general_data_address: u32,
+    pub init_in_atlas_bbox_address: u32,
+    pub init_color_data_address: u32,
+    pub bbox_data_size: u32,
+    pub general_data_size: u32,
+    pub color_data_size: u32,
+}
+
+impl DataSpecificationConstants {
+    pub fn new(num_objects_in_scene: u32) -> DataSpecificationConstants {
+        let init_general_data_address: u32 = 0;
+        let general_data_size: u32 = 4;
+        let init_in_scene_bbox_address: u32 =
+            init_general_data_address + num_objects_in_scene * general_data_size;
+        let bbox_data_size: u32 = 8;
+        let init_in_atlas_bbox_address: u32 =
+            init_in_scene_bbox_address + num_objects_in_scene * bbox_data_size;
+        let init_color_data_address: u32 =
+            init_in_atlas_bbox_address + num_objects_in_scene * bbox_data_size;
+        let color_data_size = 4;
+
+        DataSpecificationConstants {
+            object_size: GenericObject::size_in_bytes() as u32,
+            init_in_scene_bbox_address,
+            init_general_data_address,
+            init_in_atlas_bbox_address,
+            init_color_data_address,
+            bbox_data_size,
+            general_data_size,
+            color_data_size,
+        }
+    }
+
+    pub fn num_constants() -> u8 {
+        8
+    }
+
+    pub fn as_array(&self) -> [u32; 8] {
+        [
+            self.object_size,
+            self.init_in_scene_bbox_address,
+            self.init_general_data_address,
+            self.init_in_atlas_bbox_address,
+            self.init_color_data_address,
+            self.bbox_data_size,
+            self.general_data_size,
+            self.color_data_size,
+        ]
     }
 }
 
@@ -275,6 +335,7 @@ pub struct GpuState {
     compute_descriptor_heap: dx12::DescriptorHeap,
     scene_constants_buffer: dx12::Resource,
     _gpu_state_constants_buffer: dx12::Resource,
+    data_specification_constants_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
     intermediate_atlas_texture_upload_buffer: dx12::Resource,
@@ -298,6 +359,7 @@ pub struct GpuState {
 
     scene_constants: SceneConstants,
     _gpu_state_constants: GpuStateConstants,
+    data_specification_constants: DataSpecificationConstants,
 }
 
 impl GpuState {
@@ -447,19 +509,18 @@ impl GpuState {
             );
 
         let per_tile_command_lists_buffer_size_in_u32s =
-            (GenericObject::size_in_u32s() * max_objects_in_scene + 1)
-                * num_tiles_x
-                * num_tiles_y;
-        let object_data_buffer_size_in_u32s =
-            max_objects_in_scene * GenericObject::size_in_u32s();
+            (GenericObject::size_in_u32s() * max_objects_in_scene + 1) * num_tiles_x * num_tiles_y;
+        let object_data_buffer_size_in_u32s = max_objects_in_scene * GenericObject::size_in_u32s();
 
         let num_scene_constants = SceneConstants::num_constants();
         let num_gpu_state_constants = GpuStateConstants::num_constants();
+        let num_data_specification_constants = DataSpecificationConstants::num_constants();
 
         let (
             compute_descriptor_heap,
             scene_constants_buffer,
             gpu_state_constants_buffer,
+            data_specification_constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_texture_upload_buffer,
@@ -471,6 +532,7 @@ impl GpuState {
             device.clone(),
             num_scene_constants,
             num_gpu_state_constants,
+            num_data_specification_constants,
             object_data_buffer_size_in_u32s,
             per_tile_command_lists_buffer_size_in_u32s,
             atlas_width,
@@ -480,17 +542,17 @@ impl GpuState {
             canvas_height as u32,
         );
 
-        let object_size = GenericObject::size_in_bytes() as u32;
         let gpu_state_constants = GpuStateConstants {
             max_objects_in_scene,
-            object_size,
             tile_side_length_in_pixels,
             num_tiles_x,
             num_tiles_y,
         };
         let gpu_state_constants_array = gpu_state_constants.as_array();
-        gpu_state_constants_buffer.upload_data_to_resource(gpu_state_constants_array.len(), gpu_state_constants_array.as_ptr());
-
+        gpu_state_constants_buffer.upload_data_to_resource(
+            gpu_state_constants_array.len(),
+            gpu_state_constants_array.as_ptr(),
+        );
         let (
             per_tile_command_lists_pipeline_state,
             paint_pipeline_state,
@@ -546,6 +608,7 @@ impl GpuState {
             compute_descriptor_heap,
             scene_constants_buffer,
             _gpu_state_constants_buffer: gpu_state_constants_buffer,
+            data_specification_constants_buffer: data_specification_constants_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_atlas_texture_upload_buffer: intermediate_texture_upload_buffer,
@@ -572,6 +635,7 @@ impl GpuState {
             },
 
             _gpu_state_constants: gpu_state_constants,
+            data_specification_constants: DataSpecificationConstants::new(0),
         };
 
         // wait for upload of any resources to gpu
@@ -798,7 +862,18 @@ impl GpuState {
         self.execute_command_list();
 
         // TODO: what should the present flags be?
-        self.swapchain.present(1, 0);
+        match self.swapchain.present(1, 0) {
+            Ok(()) => {}
+            Err(hresult_as_hex) => {
+                match hresult_as_hex.as_str() {
+                    "887a0005" => panic!("presentation failed due to device removal with reason: {}", error::get_human_readable_error(&self.device.get_removal_reason())),
+                    _ => panic!(
+                        "could not present to swapchain: {}",
+                        error::get_human_readable_error(hresult_as_hex.as_str())
+                    ),
+                };
+            }
+        }
 
         self.move_to_next_frame();
     }
@@ -1036,6 +1111,7 @@ impl GpuState {
         device: dx12::Device,
         num_scene_constants: u8,
         num_gpu_state_constants: u8,
+        num_data_specification_constants: u8,
         object_data_buffer_size_in_u32s: u32,
         per_tile_command_list_buffer_size_in_u32s: u32,
         atlas_width: u64,
@@ -1045,6 +1121,7 @@ impl GpuState {
         canvas_height: u32,
     ) -> (
         dx12::DescriptorHeap,
+        dx12::Resource,
         dx12::Resource,
         dx12::Resource,
         dx12::Resource,
@@ -1086,9 +1163,8 @@ impl GpuState {
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
         device.create_byte_addressed_buffer_unordered_access_view(
             ptcl_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
-                ptcl_buffer.descriptor_heap_offset,
-            ),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset),
             0,
             per_tile_command_list_buffer_size_in_u32s,
         );
@@ -1098,11 +1174,10 @@ impl GpuState {
             panic!("not designed to handle more than 8 scene constants");
         }
         let padded_size_in_bytes: u32 = 256;
-        let scene_constants_buffer =
-            device.create_uploadable_buffer(
-                Descriptors::SceneConstants as u32,
-                padded_size_in_bytes as u64,
-            );
+        let scene_constants_buffer = device.create_uploadable_buffer(
+            Descriptors::SceneConstants as u32,
+            padded_size_in_bytes as u64,
+        );
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
         device.create_constant_buffer_view(
             scene_constants_buffer.clone(),
@@ -1116,16 +1191,34 @@ impl GpuState {
             panic!("not designed to handle more than 8 gpu state constants");
         }
         let padded_size_in_bytes: u32 = 256;
-        let gpu_state_constants_buffer =
-            device.create_uploadable_buffer(
-                Descriptors::GpuStateConstants as u32,
-                padded_size_in_bytes as u64,
-            );
+        let gpu_state_constants_buffer = device.create_uploadable_buffer(
+            Descriptors::GpuStateConstants as u32,
+            padded_size_in_bytes as u64,
+        );
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
         device.create_constant_buffer_view(
             gpu_state_constants_buffer.clone(),
-            compute_descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(gpu_state_constants_buffer.descriptor_heap_offset),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
+                gpu_state_constants_buffer.descriptor_heap_offset,
+            ),
+            padded_size_in_bytes,
+        );
+
+        // create gpu state constants buffer
+        if num_data_specification_constants > 8 {
+            panic!("not designed to handle more than 8 gpu state constants");
+        }
+        let padded_size_in_bytes: u32 = 256;
+        let data_specification_constants_buffer = device.create_uploadable_buffer(
+            Descriptors::DataSpecificationConstants as u32,
+            padded_size_in_bytes as u64,
+        );
+        // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
+        device.create_constant_buffer_view(
+            data_specification_constants_buffer.clone(),
+            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
+                data_specification_constants_buffer.descriptor_heap_offset,
+            ),
             padded_size_in_bytes,
         );
 
@@ -1164,10 +1257,7 @@ impl GpuState {
 
         // create intermediate atlas texture upload buffer
         let intermediate_texture_upload_buffer =
-            device.create_uploadable_buffer(
-                descriptor_heap_offset,
-                atlas_size_in_bytes,
-            );
+            device.create_uploadable_buffer(descriptor_heap_offset, atlas_size_in_bytes);
         // this does not need to be shader visible, so we don't need a descriptor range for it
         // important to put it at the end of the descriptor heap, so that descriptor heap offsets
         // and descriptor table offsets match
@@ -1188,7 +1278,7 @@ impl GpuState {
         };
         let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-            NumDescriptors: 2,
+            NumDescriptors: 3,
             OffsetInDescriptorsFromTableStart: Descriptors::SceneConstants as u32,
             BaseShaderRegister: 0,
             ..mem::zeroed()
@@ -1197,7 +1287,7 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::GlyphAtlas as u32,
-            BaseShaderRegister:1,
+            BaseShaderRegister: 1,
             ..mem::zeroed()
         };
         let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
@@ -1239,6 +1329,7 @@ impl GpuState {
             compute_descriptor_heap,
             scene_constants_buffer,
             gpu_state_constants_buffer,
+            data_specification_constants_buffer,
             object_data_buffer,
             ptcl_buffer,
             intermediate_texture_upload_buffer,
@@ -1259,8 +1350,21 @@ impl GpuState {
             Some(n) => {
                 self.scene_constants.num_objects_in_scene = n;
                 let scene_constants_array = self.scene_constants.as_array();
-                self.scene_constants_buffer.upload_data_to_resource(scene_constants_array.len(), scene_constants_array.as_ptr());
-            },
+
+                self.data_specification_constants = DataSpecificationConstants::new(n);
+                let data_specification_constants_array = self.data_specification_constants.as_array();
+
+                self.scene_constants_buffer.upload_data_to_resource(
+                    scene_constants_array.len(),
+                    scene_constants_array.as_ptr(),
+                );
+
+                self.data_specification_constants_buffer
+                    .upload_data_to_resource(
+                        data_specification_constants_array.len(),
+                        data_specification_constants_array.as_ptr(),
+                    );
+            }
             None => {}
         }
 

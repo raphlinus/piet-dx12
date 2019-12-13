@@ -11,20 +11,32 @@ RWByteAddressBuffer per_tile_command_list: register(u0);
 cbuffer SceneConstants: register(b0) {
     uint num_objects_in_scene;
 };
+
 cbuffer GpuStateConstants : register(b1)
 {
     uint max_objects_in_scene;
-	uint object_size;
 	uint tile_side_length_in_pixels;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
+cbuffer DataSpecificationConstants : register(b2)
+{
+    uint object_size;
+    uint init_in_scene_bbox_address;
+    uint init_general_data_address;
+    uint init_in_atlas_bbox_address;
+    uint init_color_data_address;
+    uint bbox_data_size;
+    uint general_data_size;
+    uint color_data_size;
+}
+
 Texture2D<float> glyph_atlas : register(t1);
 RWTexture2D<float4> canvas : register(u1);
 
-#include "shaders/command_loaders.hlsl"
-#include "shaders/unpack.hlsl"
+#include "C:/Users/bhmer/Desktop/piet-dx12/shaders/command_loaders.hlsl"
+#include "C:/Users/bhmer/Desktop/piet-dx12/shaders/unpack.hlsl"
 
 bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     uint px = pixel_pos.x;
@@ -293,30 +305,35 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
 
     uint2 pixel_pos = DTid.xy;
 
-
     uint linear_tile_ix = Gid.y*num_tiles_x + Gid.x;
-    uint size_of_command_list = 4 + max_objects_in_scene*object_size;
+    uint size_of_command_list = 4 + num_objects_in_scene*object_size;
     uint num_commands_address = size_of_command_list*linear_tile_ix;
 
     uint this_tile_num_commands = per_tile_command_list.Load(num_commands_address);
 
-
-    uint init_address = num_commands_address + 4;
+    uint cmd_general_data_start = num_commands_address + 4;
+    uint cmd_in_scene_bbox_start = cmd_general_data_start + num_objects_in_scene*general_data_size;
+    uint cmd_in_atlas_bbox_start = cmd_in_scene_bbox_start + num_objects_in_scene*bbox_data_size;
+    uint cmd_color_start = cmd_in_atlas_bbox_start + num_objects_in_scene*bbox_data_size;
 
     for (uint i = 0; i < this_tile_num_commands; i++) {
-        //float4 fg = {0.0, 0.0, 0.0, 0.0};
-        uint command_address = i*object_size + init_address;
-        uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_from_cmd(command_address);
+        /**
+        fg.g = 1.0;
+        fg.a = 1.0;
+        bg = blend_pd_over(bg, fg);
+        **/
+
+        uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_from_cmd(cmd_in_scene_bbox_start + i*bbox_data_size);
         uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
-        
+
         bool hit = is_pixel_in_bbox(pixel_pos, in_scene_bbox);
 
         if (hit) {
-            uint packed_object_specific_data = load_packed_object_specific_data_from_cmd(command_address);
-            uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
-            uint object_type = object_specific_data.x;
+            uint packed_general_data = load_packed_general_data_from_cmd(cmd_general_data_start + i*general_data_size);
+            uint2 general_data = unpack_general_data(packed_general_data);
+            uint object_type = general_data.x;
 
-            uint packed_color = load_packed_color_from_cmd(command_address);
+            uint packed_color = load_packed_color_from_cmd(cmd_color_start + i*color_data_size);
             fg = unpack_color(packed_color);
 
             if (object_type == 0) {
@@ -324,7 +341,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
                 fg.a = calculate_pixel_alpha_due_to_circle(pixel_pos, in_scene_bbox, fg.a);
             } else {
                 //float4 blue = {0.0, 0.0, 1.0, 1.0};
-                uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(command_address);
+                uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(cmd_in_atlas_bbox_start + i*bbox_data_size);
                 uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
 
                 fg.a = calculate_pixel_alpha_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, fg.a);
@@ -333,102 +350,39 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             bg = blend_pd_over(bg, fg);
         }
     }
-
+    
     /**
-    uint2 packed_in_atlas_bbox0 = load_packed_in_atlas_bbox_at_object_index(0);
-    uint4 in_atlas_bbox0 = unpack_bbox(packed_in_atlas_bbox0);
-    uint2 packed_in_scene_bbox0 = load_packed_in_scene_bbox_at_object_index(0);
-    uint4 in_scene_bbox0 = unpack_bbox(packed_in_scene_bbox0);
-    bool hit0 = is_pixel_in_bbox(pixel_pos, in_scene_bbox0);
-
-    if (hit0) {
-        fg.r = 1.0;
-        fg.g = 0.0;
-        fg.b = 0.0;
-        fg.a = 1.0;
-    }
-
-    uint2 packed_in_atlas_bbox1 = load_packed_in_atlas_bbox_at_object_index(1);
-    uint4 in_atlas_bbox1 = unpack_bbox(packed_in_atlas_bbox1);
-    uint2 packed_in_scene_bbox1 = load_packed_in_scene_bbox_at_object_index(1);
-    uint4 in_scene_bbox1 = unpack_bbox(packed_in_scene_bbox1);
-    bool hit1 = is_pixel_in_bbox(pixel_pos, in_scene_bbox1);
-
-    if (hit1) {
-        fg.r = 0.0;
-        fg.g = 1.0;
-        fg.b = 0.0;
-        fg.a = 1.0;
-    }
-
-    uint2 packed_in_atlas_bbox2 = load_packed_in_atlas_bbox_at_object_index(2);
-    uint4 in_atlas_bbox2 = unpack_bbox(packed_in_atlas_bbox2);
-    uint2 packed_in_scene_bbox2 = load_packed_in_scene_bbox_at_object_index(2);
-    uint4 in_scene_bbox2 = unpack_bbox(packed_in_scene_bbox2);
-    bool hit2 = is_pixel_in_bbox(pixel_pos, in_scene_bbox2);
-
-    if (hit2) {
-        fg.r = 0.0;
-        fg.g = 0.0;
-        fg.b = 1.0;
-        fg.a = 1.0;
-    }
-    **/
-
-    /**
-    uint2 rect_origin = {800, 300};
+    uint2 rect_origin = {200, 200};
     uint2 rect_size = {50, 10};
     fg.r = 1.0;
     fg.g = 1.0;
     fg.b = 1.0;
     fg.a = 0.0;
 
-    uint packed_object_specific_data = load_packed_object_specific_data_at_object_index(0);
-    uint2 object_specific_data = unpack_object_specific_data(packed_object_specific_data);
-
-    uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_at_object_index(0);
-    uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
-
-    uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_at_object_index(0);
+    uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_from_cmd(cmd_in_scene_bbox_start);
     uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
 
-    uint packed_color = load_packed_color_at_object_index(0);
-    float4 color = unpack_color(packed_color);
+    uint packed_general_data = load_packed_general_data_from_cmd(cmd_general_data_start);
+    uint2 general_data = unpack_general_data(packed_general_data);
+    uint object_type = general_data.x;
 
-    bool hit = is_pixel_in_bbox(pixel_pos, in_scene_bbox);
+    uint packed_color = load_packed_color_from_cmd(cmd_color_start);
+    uint4 int_color = extract_u8s_from_uint(packed_color);
 
-    if (hit) {
-        fg.a = 1.0;
-    }
-
-    //fg.a = number_shader(in_scene_bbox[0], pixel_pos, rect_origin, rect_size);
+    fg.a = number_shader(int_color[0], pixel_pos, rect_origin, rect_size);
 
     bg = blend_pd_over(bg, fg);
     **/
 
     /**
-    if (scene_bbox_hit) {
-        fg.r = 1.0;
-        fg.g = 1.0;
-        fg.b = 1.0;
+    fg.r = 1.0;
+    fg.g = 0.0;
+    fg.b = 0.0;
+    fg.a = 0.0;
+
+    if (this_tile_num_commands > 0) {
         fg.a = 1.0;
     }
-
-    if (this_tile_num_commands == 1) {
-        fg.r = 1.0;
-        fg.g = 0.0;
-        fg.b = 0.0;
-        fg.a = 1.0;
-    }
-
-
-    if (focus_tile_hit) {
-            fg.r = 1.0;
-            fg.g = 0.0;
-            fg.b = 0.0;
-            fg.a = 1.0;
-    }
-
 
     bg = blend_pd_over(bg, fg);
     **/

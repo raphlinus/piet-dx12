@@ -6,16 +6,28 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-uint load_packed_object_specific_data_at_object_index(uint ix, uint object_size) {
-    uint data_address = ix*object_size;
+uint2 load_packed_in_scene_bbox_at_object_index(uint ix) {
+    uint x_address = init_in_scene_bbox_address + ix*bbox_data_size;
+    uint y_address = x_address + 4;
+
+    uint packed_bbox_x = object_data_buffer.Load(x_address);
+    uint packed_bbox_y = object_data_buffer.Load(y_address);
+
+    uint2 packed_bbox = {packed_bbox_x, packed_bbox_y};
+
+    return packed_bbox;
+}
+
+uint load_packed_general_data_at_object_index(uint ix) {
+    uint data_address = init_general_data_address + ix*general_data_size;
 
     uint packed_data = object_data_buffer.Load(data_address);
 
     return packed_data;
 }
 
-uint2 load_packed_in_atlas_bbox_at_object_index(uint ix, uint object_size) {
-    uint x_address = ix*object_size + 4;
+uint2 load_packed_in_atlas_bbox_at_object_index(uint ix) {
+    uint x_address = init_in_atlas_bbox_address + ix*bbox_data_size;
     uint y_address = x_address + 4;
 
     uint packed_bbox_x = object_data_buffer.Load(x_address);
@@ -26,23 +38,10 @@ uint2 load_packed_in_atlas_bbox_at_object_index(uint ix, uint object_size) {
     return packed_bbox;
 }
 
-uint2 load_packed_in_scene_bbox_at_object_index(uint ix, uint object_size) {
-    uint x_address = ix*object_size + 12;
-    uint y_address = x_address + 4;
-
-    uint packed_bbox_x = object_data_buffer.Load(x_address);
-    uint packed_bbox_y = object_data_buffer.Load(y_address);
-
-    uint2 packed_bbox = {packed_bbox_x, packed_bbox_y};
-
-    return packed_bbox;
-}
-
-uint load_packed_color_at_object_index(uint ix, uint object_size) {
-    uint color_address = ix*object_size + 20;
+uint load_packed_color_at_object_index(uint ix) {
+    uint color_address = init_color_data_address + ix*color_data_size;
 
     uint packed_color = object_data_buffer.Load(color_address);
 
     return packed_color;
 }
-

@@ -14,7 +14,9 @@ use crate::error;
 use crate::error::error_if_failed_else_unit;
 use std::convert::TryFrom;
 use std::{ffi, mem, path::Path, ptr};
-use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, dxgitype, minwindef, windef, winerror};
+use winapi::shared::{
+    dxgi, dxgi1_2, dxgi1_3, dxgi1_4, dxgiformat, dxgitype, minwindef, windef, winerror,
+};
 use winapi::um::{d3d12, d3d12sdklayers, d3dcommon, d3dcompiler, dxgidebug, synchapi, winnt};
 use winapi::Interface;
 use wio::com::ComPtr;
@@ -282,13 +284,12 @@ impl SwapChain3 {
         self.0.GetCurrentBackBufferIndex()
     }
 
-    pub unsafe fn present(&self, interval: u32, flags: u32) {
+    pub unsafe fn present(&self, interval: u32, flags: u32) -> Result<(), String> {
         error::error_if_failed_else_unit(self.0.Present1(
             interval,
             flags,
             &dxgi1_2::DXGI_PRESENT_PARAMETERS { ..mem::zeroed() } as *const _,
         ))
-        .expect("could not present to swapchain");
     }
 }
 
@@ -947,11 +948,15 @@ impl Device {
 
         let (flags, initial_resource_state) = {
             if allow_unordered_access {
-                (d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-                 d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+                (
+                    d3d12::D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                    d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                )
             } else {
-                (d3d12::D3D12_RESOURCE_FLAG_NONE,
-                 d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+                (
+                    d3d12::D3D12_RESOURCE_FLAG_NONE,
+                    d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                )
             }
         };
 
@@ -982,6 +987,10 @@ impl Device {
         );
 
         buffer
+    }
+
+    pub unsafe fn get_removal_reason(&self) -> String {
+        error::convert_hresult_to_lower_hex(self.0.GetDeviceRemovedReason())
     }
 }
 
@@ -1448,6 +1457,8 @@ pub unsafe fn create_transition_resource_barrier(
 }
 
 pub unsafe fn enable_debug_layer() {
+    println!("enabling debug layer.");
+
     let mut debug_controller: *mut d3d12sdklayers::ID3D12Debug1 = ptr::null_mut();
     error::error_if_failed_else_unit(d3d12::D3D12GetDebugInterface(
         &d3d12sdklayers::ID3D12Debug1::uuidof(),
@@ -1466,6 +1477,8 @@ pub unsafe fn enable_debug_layer() {
 
     if winerror::SUCCEEDED(hr) {
         (*debug_controller).SetEnableGPUBasedValidation(minwindef::TRUE);
+    } else {
+        println!("failed to enable debug layer!");
     }
 
     (*debug_controller).Release();
