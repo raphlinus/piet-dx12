@@ -209,13 +209,14 @@ fn average_f64s(input_data: &[f64]) -> f64 {
 }
 
 pub enum Descriptors {
-    ObjectData,
-    Ptcls,
-    SceneConstants,
-    GpuStateConstants,
-    DataSpecificationConstants,
-    GlyphAtlas,
-    Canvas,
+    ObjectDataSRV,
+    PtclsUAV,
+    PtclsSRV,
+    SceneConstantsCBV,
+    GpuStateConstantsCBV,
+    DataSpecificationConstantsCBV,
+    GlyphAtlasSRV,
+    CanvasUAV,
 }
 
 // should match constants buffer as described in shaders
@@ -710,6 +711,14 @@ impl GpuState {
                 .get_gpu_descriptor_handle_at_offset(0),
         );
 
+        let transition_ptcl_to_srv = dx12::create_transition_resource_barrier(
+            self.per_tile_command_lists_buffer.com_ptr.as_raw(),
+            d3d12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            d3d12::D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        );
+        self.command_list
+            .set_resource_barrier(vec![transition_ptcl_to_srv]);
+
         self.command_list.end_timing_query(
             self.query_heap.clone(),
             TimingQueryPoints::PaintInitComplete as u32 + offset,
@@ -1135,16 +1144,15 @@ impl GpuState {
         // create compute resource descriptor heap
         let compute_descriptor_heap_desc = d3d12::D3D12_DESCRIPTOR_HEAP_DESC {
             Type: d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            NumDescriptors: 7,
+            NumDescriptors: 8,
             Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
             NodeMask: 0,
         };
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
-        let mut descriptor_heap_offset: u32 = 0;
 
         // create object data buffer
         let object_data_buffer = device.create_uploadable_byte_addressed_buffer(
-            Descriptors::ObjectData as u32,
+            Descriptors::ObjectDataSRV as u32,
             object_data_buffer_size_in_u32s,
         );
         device.create_byte_addressed_buffer_shader_resource_view(
@@ -1157,7 +1165,7 @@ impl GpuState {
 
         // create per tile command list resource
         let ptcl_buffer = device.create_gpu_only_byte_addressed_buffer(
-            Descriptors::Ptcls as u32,
+            Descriptors::PtclsUAV as u32,
             per_tile_command_list_buffer_size_in_u32s,
         );
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
@@ -1168,6 +1176,13 @@ impl GpuState {
             0,
             per_tile_command_list_buffer_size_in_u32s,
         );
+        device.create_byte_addressed_buffer_shader_resource_view(
+            ptcl_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset + 1),
+            0,
+            per_tile_command_list_buffer_size_in_u32s,
+        );
 
         // create scene constants buffer
         if num_scene_constants > 8 {
@@ -1175,7 +1190,7 @@ impl GpuState {
         }
         let padded_size_in_bytes: u32 = 256;
         let scene_constants_buffer = device.create_uploadable_buffer(
-            Descriptors::SceneConstants as u32,
+            Descriptors::SceneConstantsCBV as u32,
             padded_size_in_bytes as u64,
         );
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -1192,7 +1207,7 @@ impl GpuState {
         }
         let padded_size_in_bytes: u32 = 256;
         let gpu_state_constants_buffer = device.create_uploadable_buffer(
-            Descriptors::GpuStateConstants as u32,
+            Descriptors::GpuStateConstantsCBV as u32,
             padded_size_in_bytes as u64,
         );
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -1210,7 +1225,7 @@ impl GpuState {
         }
         let padded_size_in_bytes: u32 = 256;
         let data_specification_constants_buffer = device.create_uploadable_buffer(
-            Descriptors::DataSpecificationConstants as u32,
+            Descriptors::DataSpecificationConstantsCBV as u32,
             padded_size_in_bytes as u64,
         );
         // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
@@ -1225,7 +1240,7 @@ impl GpuState {
         // create atlas texture
         let atlas_format = dxgiformat::DXGI_FORMAT_R8_UNORM;
         let atlas_texture = device.create_gpu_only_texture2d_buffer(
-            Descriptors::GlyphAtlas as u32,
+            Descriptors::GlyphAtlasSRV as u32,
             atlas_width,
             atlas_height,
             atlas_format,
@@ -1237,12 +1252,11 @@ impl GpuState {
             compute_descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(atlas_texture.descriptor_heap_offset),
         );
-        descriptor_heap_offset += 1;
 
         // create canvas resource
         let canvas_format = dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM;
         let canvas_texture = device.create_gpu_only_texture2d_buffer(
-            Descriptors::Canvas as u32,
+            Descriptors::CanvasUAV as u32,
             canvas_width,
             canvas_height,
             canvas_format,
@@ -1253,55 +1267,76 @@ impl GpuState {
             compute_descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(canvas_texture.descriptor_heap_offset),
         );
-        descriptor_heap_offset += 1;
 
         // create intermediate atlas texture upload buffer
         let intermediate_texture_upload_buffer =
-            device.create_uploadable_buffer(descriptor_heap_offset, atlas_size_in_bytes);
+            device.create_uploadable_buffer((Descriptors::CanvasUAV as u32) + 1, atlas_size_in_bytes);
         // this does not need to be shader visible, so we don't need a descriptor range for it
         // important to put it at the end of the descriptor heap, so that descriptor heap offsets
         // and descriptor table offsets match
 
+        let mut cbv_register_index: u32 = 0;
+        let mut srv_register_index: u32 = 0;
+        let mut uav_register_index: u32 = 0;
+
         let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: Descriptors::ObjectData as u32,
-            BaseShaderRegister: 0,
+            OffsetInDescriptorsFromTableStart: Descriptors::ObjectDataSRV as u32,
+            BaseShaderRegister: srv_register_index.clone(),
             ..mem::zeroed()
         };
-        let ptcls_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        srv_register_index += objects_descriptor_range.NumDescriptors;
+
+        let ptcls_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: Descriptors::Ptcls as u32,
-            BaseShaderRegister: 0,
+            OffsetInDescriptorsFromTableStart: Descriptors::PtclsUAV as u32,
+            BaseShaderRegister: uav_register_index.clone(),
             ..mem::zeroed()
         };
+        uav_register_index += ptcls_uav_descriptor_range.NumDescriptors;
+
+        let ptcls_srv_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::PtclsSRV as u32,
+            BaseShaderRegister: srv_register_index.clone(),
+            ..mem::zeroed()
+        };
+        srv_register_index += ptcls_srv_descriptor_range.NumDescriptors;
+
         let constants_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 3,
-            OffsetInDescriptorsFromTableStart: Descriptors::SceneConstants as u32,
-            BaseShaderRegister: 0,
+            OffsetInDescriptorsFromTableStart: Descriptors::SceneConstantsCBV as u32,
+            BaseShaderRegister: cbv_register_index.clone(),
             ..mem::zeroed()
         };
+        cbv_register_index += constants_descriptor_range.NumDescriptors;
+
         let glyph_atlas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: Descriptors::GlyphAtlas as u32,
-            BaseShaderRegister: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::GlyphAtlasSRV as u32,
+            BaseShaderRegister: srv_register_index.clone(),
             ..mem::zeroed()
         };
+        srv_register_index += glyph_atlas_descriptor_range.NumDescriptors;
+
         let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: Descriptors::Canvas as u32,
-            BaseShaderRegister: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::CanvasUAV as u32,
+            BaseShaderRegister: uav_register_index.clone(),
             ..mem::zeroed()
         };
+        uav_register_index += canvas_descriptor_range.NumDescriptors;
 
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
                 objects_descriptor_range,
-                ptcls_descriptor_range,
+                ptcls_uav_descriptor_range,
                 constants_descriptor_range,
             ];
 
@@ -1313,7 +1348,7 @@ impl GpuState {
 
         let paint_pipeline_root_signature = {
             let paint_descriptor_ranges = [
-                ptcls_descriptor_range,
+                ptcls_srv_descriptor_range,
                 constants_descriptor_range,
                 glyph_atlas_descriptor_range,
                 canvas_descriptor_range,

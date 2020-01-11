@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-RWByteAddressBuffer per_tile_command_list: register(u0);
+ByteAddressBuffer per_tile_command_list: register(t1);
 
 cbuffer SceneConstants: register(b0) {
     uint num_objects_in_scene;
@@ -32,7 +32,7 @@ cbuffer DataSpecificationConstants : register(b2)
     uint color_data_size;
 }
 
-Texture2D<float> glyph_atlas : register(t1);
+Texture2D<float> glyph_atlas : register(t2);
 RWTexture2D<float4> canvas : register(u1);
 
 #include "C:/Users/bhmer/Desktop/piet-dx12/shaders/command_loaders.hlsl"
