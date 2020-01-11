@@ -6,17 +6,34 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-extern crate font_rs;
-extern crate kurbo;
-extern crate piet;
-extern crate rand;
-
 pub mod atlas;
 pub mod dx12;
 pub mod error;
 pub mod gpu;
 pub mod scene;
 pub mod window;
+
+#[macro_use]
+extern crate piet_hlsl_derive;
+
+piet_hlsl! {
+    mod scene {
+        struct GenericObject {
+            test: [u16x2; 2]
+        }
+    }
+}
+
+fn main() {
+    //foo();
+    gen_hlsl_scene();
+}
+
+/*
+extern crate font_rs;
+extern crate kurbo;
+extern crate piet;
+extern crate rand;
 
 use atlas::Atlas;
 use font_rs::font::{parse, Font as RawFont};
@@ -611,3 +628,4 @@ fn main() {
         gpu_state.destroy();
     }
 }
+*/
