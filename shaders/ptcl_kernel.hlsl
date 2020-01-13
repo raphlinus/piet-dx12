@@ -12,7 +12,8 @@
 // then general_data_per_object starts at address a_1 = a_0 + bbox_size*num_objects_in_scene
 // in_atlas_bbox_per_object starts at a_2 = a_1 + general_data_size*num_objects_in_scene
 // ... and so on
-ByteAddressBuffer object_data_buffer : register(t0);
+ByteAddressBuffer object_in_scene_bboxes: register(t0)
+ByteAddressBuffer object_data_buffer : register(t1);
 
 RWByteAddressBuffer per_tile_command_list: register(u0);
 

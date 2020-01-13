@@ -16,10 +16,40 @@ pub mod window;
 #[macro_use]
 extern crate piet_hlsl_derive;
 
+
+
 piet_hlsl! {
     mod scene {
-        struct GenericObject {
-            test: [u16x2; 2]
+        struct SomeThing0 {
+            x: u16,
+            y: u16,
+        }
+
+        struct SomeThing1 {
+            a: u8,
+            b: u8,
+            c: u8,
+            d: u8,
+        }
+
+        struct InSceneBbox {
+            x_lims: [u16; 2],
+            y_lims: [u16; 2],
+        }
+
+        struct PietGlyph {
+            in_atlas_bbox: [u16; 4],
+            color: [u8; 4],
+        }
+
+        struct PietCircle {
+            radius: u16,
+            color: [u8; 4],
+        }
+
+        enum PietItem {
+            Circle(PietCircle),
+            Glyph(PietGlyph),
         }
     }
 }

@@ -22,7 +22,7 @@ pub enum ObjectType {
     Glyph,
 }
 
-pub struct GenericObject {
+pub struct PietItem {
     object_type: u16,
     glyph_id: u16,
     in_atlas_bbox: (u16, u16, u16, u16),
@@ -36,9 +36,9 @@ pub struct PlacedGlyph {
     pub placed_bbox: Rect,
 }
 
-impl GenericObject {
+impl PietItem {
     pub fn size_in_u32s() -> u32 {
-        let size_of_object_in_bytes = mem::size_of::<GenericObject>();
+        let size_of_object_in_bytes = mem::size_of::<PietItem>();
         let size_of_u32_in_bytes = mem::size_of::<u32>();
 
         // object should always have a size that is an integer number of u32s
@@ -49,12 +49,12 @@ impl GenericObject {
     }
 
     pub fn size_in_bytes() -> usize {
-        mem::size_of::<GenericObject>()
+        mem::size_of::<PietItem>()
     }
 }
 
 pub struct Scene {
-    pub objects: Vec<GenericObject>,
+    pub objects: Vec<PietItem>,
 }
 
 impl Scene {
@@ -132,7 +132,7 @@ impl Scene {
     }
 
     pub fn append_circle(&mut self, circle: Circle, color: [u8; 4]) {
-        self.objects.push(GenericObject {
+        self.objects.push(PietItem {
             object_type: ObjectType::Circle as u16,
             glyph_id: 0,
             in_atlas_bbox: (0, 0, 0, 0),
@@ -153,7 +153,7 @@ impl Scene {
         in_scene_bbox: Rect,
         color: [u8; 4],
     ) {
-        self.objects.push(GenericObject {
+        self.objects.push(PietItem {
             object_type: ObjectType::Glyph as u16,
             glyph_id,
             in_atlas_bbox: (

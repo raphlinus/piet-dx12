@@ -6,7 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-ByteAddressBuffer per_tile_command_list: register(t1);
+ByteAddressBuffer per_tile_command_list: register(t2);
 
 cbuffer SceneConstants: register(b0) {
     uint num_objects_in_scene;
@@ -22,14 +22,7 @@ cbuffer GpuStateConstants : register(b1)
 
 cbuffer DataSpecificationConstants : register(b2)
 {
-    uint object_size;
-    uint init_in_scene_bbox_address;
-    uint init_general_data_address;
-    uint init_in_atlas_bbox_address;
-    uint init_color_data_address;
     uint bbox_data_size;
-    uint general_data_size;
-    uint color_data_size;
 }
 
 Texture2D<float> glyph_atlas : register(t2);
@@ -317,38 +310,26 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     uint cmd_color_start = cmd_in_atlas_bbox_start + num_objects_in_scene*bbox_data_size;
 
     for (uint i = 0; i < this_tile_num_commands; i++) {
-        /**
-        fg.g = 1.0;
-        fg.a = 1.0;
-        bg = blend_pd_over(bg, fg);
-        **/
+        uint packed_general_data = load_packed_general_data_from_cmd(cmd_general_data_start + i*general_data_size);
+        uint2 general_data = unpack_general_data(packed_general_data);
+        uint object_type = general_data.x;
 
-        uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_from_cmd(cmd_in_scene_bbox_start + i*bbox_data_size);
-        uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
+        uint packed_color = load_packed_color_from_cmd(cmd_color_start + i*color_data_size);
+        uint4 unpacked_color = extract_u8x4_from_uint(packed_color);
+        fg = normalize_u8x4_by_255(unpacked_color);
 
-        bool hit = is_pixel_in_bbox(pixel_pos, in_scene_bbox);
+        if (object_type == 0) {
+            //float4 green = {0.0, 1.0, 0.0, 1.0};
+            fg.a = calculate_pixel_alpha_due_to_circle(pixel_pos, in_scene_bbox, fg.a);
+        } else {
+            //float4 blue = {0.0, 0.0, 1.0, 1.0};
+            uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(cmd_in_atlas_bbox_start + i*bbox_data_size);
+            uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
 
-        if (hit) {
-            uint packed_general_data = load_packed_general_data_from_cmd(cmd_general_data_start + i*general_data_size);
-            uint2 general_data = unpack_general_data(packed_general_data);
-            uint object_type = general_data.x;
-
-            uint packed_color = load_packed_color_from_cmd(cmd_color_start + i*color_data_size);
-            fg = unpack_color(packed_color);
-
-            if (object_type == 0) {
-                //float4 green = {0.0, 1.0, 0.0, 1.0};
-                fg.a = calculate_pixel_alpha_due_to_circle(pixel_pos, in_scene_bbox, fg.a);
-            } else {
-                //float4 blue = {0.0, 0.0, 1.0, 1.0};
-                uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(cmd_in_atlas_bbox_start + i*bbox_data_size);
-                uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
-
-                fg.a = calculate_pixel_alpha_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, fg.a);
-            }
-
-            bg = blend_pd_over(bg, fg);
+            fg.a = calculate_pixel_alpha_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, fg.a);
         }
+
+        bg = blend_pd_over(bg, fg);
     }
     
     /**
@@ -367,7 +348,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     uint object_type = general_data.x;
 
     uint packed_color = load_packed_color_from_cmd(cmd_color_start);
-    uint4 int_color = extract_u8s_from_uint(packed_color);
+    uint4 int_color = extract_u8x4_from_uint(packed_color);
 
     fg.a = number_shader(int_color[0], pixel_pos, rect_origin, rect_size);
 

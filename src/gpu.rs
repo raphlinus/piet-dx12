@@ -11,7 +11,7 @@ extern crate winapi;
 
 use crate::dx12;
 use crate::error;
-use crate::scene::GenericObject;
+use crate::scene::PietItem;
 use crate::window;
 use kurbo::Rect;
 use std::convert::TryFrom;
@@ -209,7 +209,8 @@ fn average_f64s(input_data: &[f64]) -> f64 {
 }
 
 pub enum Descriptors {
-    ObjectDataSRV,
+    ObjectBboxesSRV,
+    ObjectsSRV,
     PtclsUAV,
     PtclsSRV,
     SceneConstantsCBV,
@@ -258,55 +259,25 @@ impl GpuStateConstants {
 }
 
 pub struct DataSpecificationConstants {
-    pub object_size: u32,
-    pub init_in_scene_bbox_address: u32,
-    pub init_general_data_address: u32,
-    pub init_in_atlas_bbox_address: u32,
-    pub init_color_data_address: u32,
     pub bbox_data_size: u32,
-    pub general_data_size: u32,
-    pub color_data_size: u32,
 }
 
 impl DataSpecificationConstants {
-    pub fn new(num_objects_in_scene: u32) -> DataSpecificationConstants {
-        let init_general_data_address: u32 = 0;
-        let general_data_size: u32 = 4;
-        let init_in_scene_bbox_address: u32 =
-            init_general_data_address + num_objects_in_scene * general_data_size;
+    pub fn new() -> DataSpecificationConstants {
         let bbox_data_size: u32 = 8;
-        let init_in_atlas_bbox_address: u32 =
-            init_in_scene_bbox_address + num_objects_in_scene * bbox_data_size;
-        let init_color_data_address: u32 =
-            init_in_atlas_bbox_address + num_objects_in_scene * bbox_data_size;
-        let color_data_size = 4;
 
         DataSpecificationConstants {
-            object_size: GenericObject::size_in_bytes() as u32,
-            init_in_scene_bbox_address,
-            init_general_data_address,
-            init_in_atlas_bbox_address,
-            init_color_data_address,
             bbox_data_size,
-            general_data_size,
-            color_data_size,
         }
     }
 
     pub fn num_constants() -> u8 {
-        8
+        1
     }
 
-    pub fn as_array(&self) -> [u32; 8] {
+    pub fn as_array(&self) -> [u32; 1] {
         [
-            self.object_size,
-            self.init_in_scene_bbox_address,
-            self.init_general_data_address,
-            self.init_in_atlas_bbox_address,
-            self.init_color_data_address,
             self.bbox_data_size,
-            self.general_data_size,
-            self.color_data_size,
         ]
     }
 }
@@ -337,6 +308,7 @@ pub struct GpuState {
     scene_constants_buffer: dx12::Resource,
     _gpu_state_constants_buffer: dx12::Resource,
     data_specification_constants_buffer: dx12::Resource,
+    object_bbox_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
     intermediate_atlas_texture_upload_buffer: dx12::Resource,
@@ -509,9 +481,11 @@ impl GpuState {
                 command_queue.clone(),
             );
 
-        let per_tile_command_lists_buffer_size_in_u32s =
-            (GenericObject::size_in_u32s() * max_objects_in_scene + 1) * num_tiles_x * num_tiles_y;
-        let object_data_buffer_size_in_u32s = max_objects_in_scene * GenericObject::size_in_u32s();
+        let per_tile_command_lists_buffer_size_in_bytes =
+            (PietItem::size_in_bytes() as u32) * (max_objects_in_scene + 1) * num_tiles_x * num_tiles_y;
+        let data_specification_constants = DataSpecificationConstants::new();
+        let object_bbox_buffer_size_in_bytes = max_objects_in_scene * data_specification_constants.bbox_data_size;
+        let object_data_buffer_size_in_bytes = max_objects_in_scene * (PietItem::size_in_bytes() as u32);
 
         let num_scene_constants = SceneConstants::num_constants();
         let num_gpu_state_constants = GpuStateConstants::num_constants();
@@ -522,6 +496,7 @@ impl GpuState {
             scene_constants_buffer,
             gpu_state_constants_buffer,
             data_specification_constants_buffer,
+            object_bbox_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_texture_upload_buffer,
@@ -534,8 +509,9 @@ impl GpuState {
             num_scene_constants,
             num_gpu_state_constants,
             num_data_specification_constants,
-            object_data_buffer_size_in_u32s,
-            per_tile_command_lists_buffer_size_in_u32s,
+            object_bbox_buffer_size_in_bytes,
+            object_data_buffer_size_in_bytes,
+            per_tile_command_lists_buffer_size_in_bytes,
             atlas_width,
             atlas_height,
             atlas_size_in_bytes,
@@ -610,6 +586,7 @@ impl GpuState {
             scene_constants_buffer,
             _gpu_state_constants_buffer: gpu_state_constants_buffer,
             data_specification_constants_buffer: data_specification_constants_buffer,
+            object_bbox_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
             intermediate_atlas_texture_upload_buffer: intermediate_texture_upload_buffer,
@@ -636,7 +613,7 @@ impl GpuState {
             },
 
             _gpu_state_constants: gpu_state_constants,
-            data_specification_constants: DataSpecificationConstants::new(0),
+            data_specification_constants: DataSpecificationConstants::new(),
         };
 
         // wait for upload of any resources to gpu
@@ -1121,8 +1098,9 @@ impl GpuState {
         num_scene_constants: u8,
         num_gpu_state_constants: u8,
         num_data_specification_constants: u8,
-        object_data_buffer_size_in_u32s: u32,
-        per_tile_command_list_buffer_size_in_u32s: u32,
+        object_bbox_buffer_size_in_bytes: u32,
+        object_data_buffer_size_in_bytes: u32,
+        per_tile_command_list_buffer_size_in_bytes: u32,
         atlas_width: u64,
         atlas_height: u32,
         atlas_size_in_bytes: u64,
@@ -1130,6 +1108,7 @@ impl GpuState {
         canvas_height: u32,
     ) -> (
         dx12::DescriptorHeap,
+        dx12::Resource,
         dx12::Resource,
         dx12::Resource,
         dx12::Resource,
@@ -1150,23 +1129,36 @@ impl GpuState {
         };
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
-        // create object data buffer
-        let object_data_buffer = device.create_uploadable_byte_addressed_buffer(
-            Descriptors::ObjectDataSRV as u32,
-            object_data_buffer_size_in_u32s,
+        // create object bboxes buffer
+        let object_bbox_buffer = device.create_uploadable_byte_addressed_buffer(
+            Descriptors::ObjectBboxesSRV as u32,
+            object_bbox_buffer_size_in_bytes,
         );
         device.create_byte_addressed_buffer_shader_resource_view(
-            object_data_buffer.clone(),
+            object_bbox_buffer.clone(),
             compute_descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(object_data_buffer.descriptor_heap_offset),
+                .get_cpu_descriptor_handle_at_offset(object_bbox_buffer.descriptor_heap_offset),
             0,
-            object_data_buffer_size_in_u32s,
+            object_bbox_buffer_size_in_bytes,
+        );
+
+        // create objects buffer
+        let objects_buffer = device.create_uploadable_byte_addressed_buffer(
+            Descriptors::ObjectsSRV as u32,
+            object_data_buffer_size_in_bytes,
+        );
+        device.create_byte_addressed_buffer_shader_resource_view(
+            objects_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(objects_buffer.descriptor_heap_offset),
+            0,
+            object_data_buffer_size_in_bytes,
         );
 
         // create per tile command list resource
         let ptcl_buffer = device.create_gpu_only_byte_addressed_buffer(
             Descriptors::PtclsUAV as u32,
-            per_tile_command_list_buffer_size_in_u32s,
+            per_tile_command_list_buffer_size_in_bytes,
         );
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
         device.create_byte_addressed_buffer_unordered_access_view(
@@ -1174,14 +1166,14 @@ impl GpuState {
             compute_descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset),
             0,
-            per_tile_command_list_buffer_size_in_u32s,
+            per_tile_command_list_buffer_size_in_bytes,
         );
         device.create_byte_addressed_buffer_shader_resource_view(
             ptcl_buffer.clone(),
             compute_descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset + 1),
             0,
-            per_tile_command_list_buffer_size_in_u32s,
+            per_tile_command_list_buffer_size_in_bytes,
         );
 
         // create scene constants buffer
@@ -1275,15 +1267,24 @@ impl GpuState {
         // important to put it at the end of the descriptor heap, so that descriptor heap offsets
         // and descriptor table offsets match
 
-        let mut cbv_register_index: u32 = 0;
+        let cbv_register_index: u32 = 0;
         let mut srv_register_index: u32 = 0;
         let mut uav_register_index: u32 = 0;
+
+        let object_bbox_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::ObjectBboxesSRV as u32,
+            BaseShaderRegister: srv_register_index,
+            ..mem::zeroed()
+        };
+        srv_register_index += object_bbox_descriptor_range.NumDescriptors;
 
         let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: Descriptors::ObjectDataSRV as u32,
-            BaseShaderRegister: srv_register_index.clone(),
+            OffsetInDescriptorsFromTableStart: Descriptors::ObjectsSRV as u32,
+            BaseShaderRegister: srv_register_index,
             ..mem::zeroed()
         };
         srv_register_index += objects_descriptor_range.NumDescriptors;
@@ -1292,7 +1293,7 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::PtclsUAV as u32,
-            BaseShaderRegister: uav_register_index.clone(),
+            BaseShaderRegister: uav_register_index,
             ..mem::zeroed()
         };
         uav_register_index += ptcls_uav_descriptor_range.NumDescriptors;
@@ -1301,7 +1302,7 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::PtclsSRV as u32,
-            BaseShaderRegister: srv_register_index.clone(),
+            BaseShaderRegister: srv_register_index,
             ..mem::zeroed()
         };
         srv_register_index += ptcls_srv_descriptor_range.NumDescriptors;
@@ -1310,31 +1311,29 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 3,
             OffsetInDescriptorsFromTableStart: Descriptors::SceneConstantsCBV as u32,
-            BaseShaderRegister: cbv_register_index.clone(),
+            BaseShaderRegister: cbv_register_index,
             ..mem::zeroed()
         };
-        cbv_register_index += constants_descriptor_range.NumDescriptors;
 
         let glyph_atlas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::GlyphAtlasSRV as u32,
-            BaseShaderRegister: srv_register_index.clone(),
+            BaseShaderRegister: srv_register_index,
             ..mem::zeroed()
         };
-        srv_register_index += glyph_atlas_descriptor_range.NumDescriptors;
 
         let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::CanvasUAV as u32,
-            BaseShaderRegister: uav_register_index.clone(),
+            BaseShaderRegister: uav_register_index,
             ..mem::zeroed()
         };
-        uav_register_index += canvas_descriptor_range.NumDescriptors;
 
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
+                object_bbox_descriptor_range,
                 objects_descriptor_range,
                 ptcls_uav_descriptor_range,
                 constants_descriptor_range,
@@ -1365,7 +1364,8 @@ impl GpuState {
             scene_constants_buffer,
             gpu_state_constants_buffer,
             data_specification_constants_buffer,
-            object_data_buffer,
+            object_bbox_buffer,
+            objects_buffer,
             ptcl_buffer,
             intermediate_texture_upload_buffer,
             atlas_texture,
@@ -1378,6 +1378,7 @@ impl GpuState {
     pub unsafe fn upload_data(
         &mut self,
         num_objects_in_scene: Option<u32>,
+        object_bboxes: Option<Vec<u8>>,
         object_data: Option<Vec<u8>>,
         atlas_bytes: Option<&[u8]>,
     ) {
@@ -1386,7 +1387,7 @@ impl GpuState {
                 self.scene_constants.num_objects_in_scene = n;
                 let scene_constants_array = self.scene_constants.as_array();
 
-                self.data_specification_constants = DataSpecificationConstants::new(n);
+                self.data_specification_constants = DataSpecificationConstants::new();
                 let data_specification_constants_array = self.data_specification_constants.as_array();
 
                 self.scene_constants_buffer.upload_data_to_resource(
@@ -1399,6 +1400,14 @@ impl GpuState {
                         data_specification_constants_array.len(),
                         data_specification_constants_array.as_ptr(),
                     );
+            }
+            None => {}
+        }
+
+        match object_bboxes {
+            Some(bytes) => {
+                self.object_bbox_buffer
+                    .upload_data_to_resource(bytes.len(), bytes.as_ptr());
             }
             None => {}
         }

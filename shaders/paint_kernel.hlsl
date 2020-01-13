@@ -334,7 +334,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             uint object_type = general_data.x;
 
             uint packed_color = load_packed_color_from_cmd(cmd_color_start + i*color_data_size);
-            fg = unpack_color(packed_color);
+            fg = extract_u8x4_normalized_by_255(packed_color);
 
             if (object_type == 0) {
                 //float4 green = {0.0, 1.0, 0.0, 1.0};
@@ -367,7 +367,7 @@ void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     uint object_type = general_data.x;
 
     uint packed_color = load_packed_color_from_cmd(cmd_color_start);
-    uint4 int_color = extract_u8s_from_uint(packed_color);
+    uint4 int_color = extract_u8x4_from_uint(packed_color);
 
     fg.a = number_shader(int_color[0], pixel_pos, rect_origin, rect_size);
 

@@ -12,7 +12,8 @@
 // then general_data_per_object starts at address a_1 = a_0 + bbox_size*num_objects_in_scene
 // in_atlas_bbox_per_object starts at a_2 = a_1 + general_data_size*num_objects_in_scene
 // ... and so on
-ByteAddressBuffer object_data_buffer : register(t0);
+ByteAddressBuffer object_in_scene_bboxes: register(t0)
+ByteAddressBuffer object_data_buffer : register(t1);
 
 RWByteAddressBuffer per_tile_command_list: register(u0);
 
@@ -30,14 +31,7 @@ cbuffer GpuStateConstants : register(b1)
 
 cbuffer DataSpecificationConstants : register(b2)
 {
-    uint object_size;
-    uint init_in_scene_bbox_address;
-    uint init_general_data_address;
-    uint init_in_atlas_bbox_address;
-    uint init_color_data_address;
     uint bbox_data_size;
-    uint general_data_size;
-    uint color_data_size;
 }
 
 #include "shaders/object_loaders.hlsl"
