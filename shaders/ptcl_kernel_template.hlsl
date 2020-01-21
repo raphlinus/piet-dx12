@@ -29,11 +29,6 @@ cbuffer GpuStateConstants : register(b1)
     uint num_tiles_y;
 };
 
-cbuffer DataSpecificationConstants : register(b2)
-{
-    uint bbox_data_size;
-}
-
 #include "shaders/object_loaders.hlsl"
 #include "shaders/unpack.hlsl"
 

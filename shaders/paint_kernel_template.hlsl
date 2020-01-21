@@ -20,11 +20,6 @@ cbuffer GpuStateConstants : register(b1)
     uint num_tiles_y;
 };
 
-cbuffer DataSpecificationConstants : register(b2)
-{
-    uint bbox_data_size;
-}
-
 Texture2D<float> glyph_atlas : register(t2);
 RWTexture2D<float4> canvas : register(u1);
 

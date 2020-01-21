@@ -215,7 +215,6 @@ pub enum Descriptors {
     PtclsSRV,
     SceneConstantsCBV,
     GpuStateConstantsCBV,
-    DataSpecificationConstantsCBV,
     GlyphAtlasSRV,
     CanvasUAV,
 }
@@ -258,30 +257,6 @@ impl GpuStateConstants {
     }
 }
 
-pub struct DataSpecificationConstants {
-    pub bbox_data_size: u32,
-}
-
-impl DataSpecificationConstants {
-    pub fn new() -> DataSpecificationConstants {
-        let bbox_data_size: u32 = 8;
-
-        DataSpecificationConstants {
-            bbox_data_size,
-        }
-    }
-
-    pub fn num_constants() -> u8 {
-        1
-    }
-
-    pub fn as_array(&self) -> [u32; 1] {
-        [
-            self.bbox_data_size,
-        ]
-    }
-}
-
 pub struct GpuState {
     // pipeline stuff
     device: dx12::Device,
@@ -307,7 +282,6 @@ pub struct GpuState {
     compute_descriptor_heap: dx12::DescriptorHeap,
     scene_constants_buffer: dx12::Resource,
     _gpu_state_constants_buffer: dx12::Resource,
-    data_specification_constants_buffer: dx12::Resource,
     object_bbox_buffer: dx12::Resource,
     object_data_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
@@ -332,7 +306,6 @@ pub struct GpuState {
 
     scene_constants: SceneConstants,
     _gpu_state_constants: GpuStateConstants,
-    data_specification_constants: DataSpecificationConstants,
 }
 
 impl GpuState {
@@ -483,19 +456,16 @@ impl GpuState {
 
         let per_tile_command_lists_buffer_size_in_bytes =
             (PietItem::size_in_bytes() as u32) * (max_objects_in_scene + 1) * num_tiles_x * num_tiles_y;
-        let data_specification_constants = DataSpecificationConstants::new();
-        let object_bbox_buffer_size_in_bytes = max_objects_in_scene * data_specification_constants.bbox_data_size;
+        let object_bbox_buffer_size_in_bytes = max_objects_in_scene * 64;
         let object_data_buffer_size_in_bytes = max_objects_in_scene * (PietItem::size_in_bytes() as u32);
 
         let num_scene_constants = SceneConstants::num_constants();
         let num_gpu_state_constants = GpuStateConstants::num_constants();
-        let num_data_specification_constants = DataSpecificationConstants::num_constants();
 
         let (
             compute_descriptor_heap,
             scene_constants_buffer,
             gpu_state_constants_buffer,
-            data_specification_constants_buffer,
             object_bbox_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
@@ -508,7 +478,6 @@ impl GpuState {
             device.clone(),
             num_scene_constants,
             num_gpu_state_constants,
-            num_data_specification_constants,
             object_bbox_buffer_size_in_bytes,
             object_data_buffer_size_in_bytes,
             per_tile_command_lists_buffer_size_in_bytes,
@@ -585,7 +554,6 @@ impl GpuState {
             compute_descriptor_heap,
             scene_constants_buffer,
             _gpu_state_constants_buffer: gpu_state_constants_buffer,
-            data_specification_constants_buffer: data_specification_constants_buffer,
             object_bbox_buffer,
             object_data_buffer,
             per_tile_command_lists_buffer,
@@ -613,7 +581,6 @@ impl GpuState {
             },
 
             _gpu_state_constants: gpu_state_constants,
-            data_specification_constants: DataSpecificationConstants::new(),
         };
 
         // wait for upload of any resources to gpu
@@ -1097,7 +1064,6 @@ impl GpuState {
         device: dx12::Device,
         num_scene_constants: u8,
         num_gpu_state_constants: u8,
-        num_data_specification_constants: u8,
         object_bbox_buffer_size_in_bytes: u32,
         object_data_buffer_size_in_bytes: u32,
         per_tile_command_list_buffer_size_in_bytes: u32,
@@ -1108,7 +1074,6 @@ impl GpuState {
         canvas_height: u32,
     ) -> (
         dx12::DescriptorHeap,
-        dx12::Resource,
         dx12::Resource,
         dx12::Resource,
         dx12::Resource,
@@ -1207,24 +1172,6 @@ impl GpuState {
             gpu_state_constants_buffer.clone(),
             compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
                 gpu_state_constants_buffer.descriptor_heap_offset,
-            ),
-            padded_size_in_bytes,
-        );
-
-        // create gpu state constants buffer
-        if num_data_specification_constants > 8 {
-            panic!("not designed to handle more than 8 gpu state constants");
-        }
-        let padded_size_in_bytes: u32 = 256;
-        let data_specification_constants_buffer = device.create_uploadable_buffer(
-            Descriptors::DataSpecificationConstantsCBV as u32,
-            padded_size_in_bytes as u64,
-        );
-        // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
-        device.create_constant_buffer_view(
-            data_specification_constants_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
-                data_specification_constants_buffer.descriptor_heap_offset,
             ),
             padded_size_in_bytes,
         );
@@ -1363,7 +1310,6 @@ impl GpuState {
             compute_descriptor_heap,
             scene_constants_buffer,
             gpu_state_constants_buffer,
-            data_specification_constants_buffer,
             object_bbox_buffer,
             objects_buffer,
             ptcl_buffer,
@@ -1387,19 +1333,10 @@ impl GpuState {
                 self.scene_constants.num_objects_in_scene = n;
                 let scene_constants_array = self.scene_constants.as_array();
 
-                self.data_specification_constants = DataSpecificationConstants::new();
-                let data_specification_constants_array = self.data_specification_constants.as_array();
-
                 self.scene_constants_buffer.upload_data_to_resource(
                     scene_constants_array.len(),
                     scene_constants_array.as_ptr(),
                 );
-
-                self.data_specification_constants_buffer
-                    .upload_data_to_resource(
-                        data_specification_constants_array.len(),
-                        data_specification_constants_array.as_ptr(),
-                    );
             }
             None => {}
         }
