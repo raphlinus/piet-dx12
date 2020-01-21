@@ -17,16 +17,54 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryFrom;
 use std::mem;
 
-pub enum ObjectType {
+pub enum PietItemType {
     Circle,
     Glyph,
 }
 
+pub struct InSceneBBox {
+    x_lims: (u16, u16),
+    y_lims: (u16, u16),
+}
+
+impl InSceneBBox {
+    fn new(x_min: u16, x_max: u16, y_min: u16, y_max: u16) -> InSceneBBox {
+        InSceneBBox {
+            x_lims: (x_min, x_max),
+            y_lims: (y_min, y_max),
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+
+        // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
+        // scene_bbox_x_max
+        bytes
+            .write_u16::<LittleEndian>(self.x_lims.1)
+            .expect("could not convert u16 to bytes");
+        // scene_bbox_x_min
+        bytes
+            .write_u16::<LittleEndian>(self.x_lims.0)
+            .expect("could not convert u16 to bytes");
+
+        // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
+        // scene_bbox_x_max
+        bytes
+            .write_u16::<LittleEndian>(self.y_lims.1)
+            .expect("could not convert u16 to bytes");
+        // scene_bbox_x_min
+        bytes
+            .write_u16::<LittleEndian>(self.y_lims.0)
+            .expect("could not convert u16 to bytes");
+
+        bytes
+    }
+}
+
 pub struct PietItem {
-    object_type: u16,
-    glyph_id: u16,
+    tag: u32,
     in_atlas_bbox: (u16, u16, u16, u16),
-    in_scene_bbox: (u16, u16, u16, u16),
     color: [u8; 4],
 }
 
@@ -38,112 +76,91 @@ pub struct PlacedGlyph {
 
 impl PietItem {
     pub fn size_in_u32s() -> u32 {
-        let size_of_object_in_bytes = mem::size_of::<PietItem>();
+        let size_of_item_in_bytes = mem::size_of::<PietItem>();
         let size_of_u32_in_bytes = mem::size_of::<u32>();
 
-        // object should always have a size that is an integer number of u32s
-        assert_eq!(size_of_object_in_bytes % size_of_u32_in_bytes, 0);
+        // item should always have a size that is an integer number of u32s
+        assert_eq!(size_of_item_in_bytes % size_of_u32_in_bytes, 0);
 
-        u32::try_from(size_of_object_in_bytes / size_of_u32_in_bytes)
-            .expect("could not safely convert size of object in u32s into a u32 value")
+        u32::try_from(size_of_item_in_bytes / size_of_u32_in_bytes)
+            .expect("could not safely convert size of item in u32s into a u32 value")
     }
 
     pub fn size_in_bytes() -> usize {
         mem::size_of::<PietItem>()
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes: Vec<u8> = Vec::new();
+
+        bytes.write_u32::<LittleEndian>(self.tag);
+
+        // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
+        // atlas_bbox_x_max
+        bytes
+            .write_u16::<LittleEndian>(self.in_atlas_bbox.1)
+            .expect("could not convert u16 to bytes");
+        // atlas_bbox_x_min
+        bytes
+            .write_u16::<LittleEndian>(self.in_atlas_bbox.0)
+            .expect("could not convert u16 to bytes");
+
+        // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
+        // atlas_bbox_x_max
+        bytes
+            .write_u16::<LittleEndian>(self.in_atlas_bbox.1)
+            .expect("could not convert u16 to bytes");
+        // atlas_bbox_x_min
+        bytes
+            .write_u16::<LittleEndian>(self.in_atlas_bbox.0)
+            .expect("could not convert u16 to bytes");
+
+        for component in self.color.iter().rev() {
+            bytes.push(*component);
+        }
+
+        bytes
+    }
 }
 
 pub struct Scene {
-    pub objects: Vec<PietItem>,
+    pub item_bboxes: Vec<InSceneBBox>,
+    pub items: Vec<PietItem>,
 }
 
 impl Scene {
     pub fn new_empty() -> Scene {
         Scene {
-            objects: Vec::new(),
+            item_bboxes: Vec::new(),
+            items: Vec::new(),
         }
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut general_data_in_bytes = Vec::<u8>::new();
-        let mut in_scene_bbox_data_in_bytes = Vec::<u8>::new();
-        let mut in_atlas_bbox_data_in_bytes = Vec::<u8>::new();
-        let mut color_data_in_bytes = Vec::<u8>::new();
+    pub fn to_bytes(&self) -> (Vec<u8>, Vec<u8>) {
+        let mut in_scene_bboxes_in_bytes = Vec::<u8>::new();
+        let mut items_in_bytes = Vec::<u8>::new();
 
-        for object in self.objects.iter() {
-            // glyph_id
-            general_data_in_bytes
-                .write_u16::<LittleEndian>(object.glyph_id)
-                .expect("could not convert u16 to bytes");
-            // object_type
-            general_data_in_bytes
-                .write_u16::<LittleEndian>(object.object_type as u16)
-                .expect("could not convert u16 to bytes");
-
-            // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-            // scene_bbox_x_max
-            in_scene_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.1)
-                .expect("could not convert u16 to bytes");
-            // scene_bbox_x_min
-            in_scene_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.0)
-                .expect("could not convert u16 to bytes");
-
-            // scene_bbox_y_max
-            in_scene_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.3)
-                .expect("could not convert u16 to bytes");
-            // scene_bbox_y_min
-            in_scene_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_scene_bbox.2)
-                .expect("could not convert u16 to bytes");
-
-            // atlas_bbox_x_max
-            in_atlas_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_atlas_bbox.1)
-                .expect("could not convert u16 to bytes");
-            // atlas_bbox_x_min
-            in_atlas_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_atlas_bbox.0)
-                .expect("could not convert u16 to bytes");
-
-            // atlas_bbox_y_max
-            in_atlas_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_atlas_bbox.3)
-                .expect("could not convert u16 to bytes");
-            // atlas_bbox_y_min
-            in_atlas_bbox_data_in_bytes
-                .write_u16::<LittleEndian>(object.in_atlas_bbox.2)
-                .expect("could not convert u16 to bytes");
-
-            for component in object.color.iter().rev() {
-                color_data_in_bytes.push(*component);
-            }
+        for (i, item) in self.items.iter().enumerate() {
+            items_in_bytes.append(&mut item.to_bytes());
+            in_scene_bboxes_in_bytes.append(&mut self.item_bboxes[i].to_bytes());
         }
 
-        let mut scene_in_bytes = Vec::<u8>::new();
-        scene_in_bytes.append(&mut general_data_in_bytes);
-        scene_in_bytes.append(&mut in_scene_bbox_data_in_bytes);
-        scene_in_bytes.append(&mut in_atlas_bbox_data_in_bytes);
-        scene_in_bytes.append(&mut color_data_in_bytes);
-
-        scene_in_bytes
+        (in_scene_bboxes_in_bytes, items_in_bytes)
     }
 
     pub fn append_circle(&mut self, circle: Circle, color: [u8; 4]) {
-        self.objects.push(PietItem {
-            object_type: ObjectType::Circle as u16,
-            glyph_id: 0,
+        self.items.push(PietItem {
+            tag: PietItemType::Circle as u32,
             in_atlas_bbox: (0, 0, 0, 0),
-            in_scene_bbox: (
-                (circle.center.x - circle.radius) as u16,
-                (circle.center.x + circle.radius) as u16,
-                (circle.center.y - circle.radius) as u16,
-                (circle.center.y + circle.radius) as u16,
-            ),
             color,
         });
+
+        self.item_bboxes.push(InSceneBBox::new(
+            (circle.center.x - circle.radius) as u16,
+            (circle.center.x + circle.radius) as u16,
+            (circle.center.y - circle.radius) as u16,
+            (circle.center.y + circle.radius) as u16,
+        ))
     }
 
     pub fn append_glyph(
@@ -153,27 +170,27 @@ impl Scene {
         in_scene_bbox: Rect,
         color: [u8; 4],
     ) {
-        self.objects.push(PietItem {
-            object_type: ObjectType::Glyph as u16,
-            glyph_id,
+        self.items.push(PietItem {
+            tag: PietItemType::Glyph as u32,
             in_atlas_bbox: (
                 in_atlas_bbox.x0 as u16,
                 in_atlas_bbox.x1 as u16,
                 in_atlas_bbox.y0 as u16,
                 in_atlas_bbox.y1 as u16,
             ),
-            in_scene_bbox: (
-                in_scene_bbox.x0 as u16,
-                in_scene_bbox.x1 as u16,
-                in_scene_bbox.y0 as u16,
-                in_scene_bbox.y1 as u16,
-            ),
             color,
         });
+
+        self.item_bboxes.push(InSceneBBox::new(
+            in_scene_bbox.x0 as u16,
+            in_scene_bbox.x1 as u16,
+            in_scene_bbox.y0 as u16,
+            in_scene_bbox.y1 as u16,
+        ))
     }
 
     pub fn initialize_test_scene0(&mut self) {
-        self.objects = Vec::new();
+        self.items = Vec::new();
 
         let (scene_bbox_x_min, scene_bbox_y_min): (u16, u16) = (100, 100);
 
