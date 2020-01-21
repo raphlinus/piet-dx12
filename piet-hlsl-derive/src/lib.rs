@@ -119,7 +119,7 @@ impl std::fmt::Display for GpuScalar {
     }
 }
 
-// HLSL decoder generation helper function
+// HLSL helpers
 fn hlsl_get_ref_plus_offset(current_offset: usize) -> String {
     match current_offset {
         0 => String::from("ref"),
@@ -127,7 +127,6 @@ fn hlsl_get_ref_plus_offset(current_offset: usize) -> String {
     }
 }
 
-// HLSL decoder generation helper function
 fn hlsl_calculate_num_uints_required_for_storage(ty: &GpuScalar, num_elements: usize) -> usize {
     let num_scalars_in_a_uint: usize = match ty {
         GpuScalar::I8 | GpuScalar::U8 => 4,
@@ -163,7 +162,6 @@ fn hlsl_generate_value_extractor(value_bit_size: u32) -> String {
     extractor
 }
 
-// HLSL decoder generation helper function
 fn hlsl_generate_readers_accessors_and_unpackers(
     name: &String,
     package_fields: &Vec<(String, GpuType, Option<Vec<(String, GpuType, usize)>>)>,
@@ -198,14 +196,24 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                 package_fieldname,
                 hlsl_get_ref_plus_offset(current_offset),
             ),
-            GpuType::Vector(scalar, size) => format!(
-                "    {}{} {} = buf.Load{}({});\n",
-                scalar.hlsl_typename(),
-                size,
-                package_fieldname,
-                size,
-                hlsl_get_ref_plus_offset(current_offset)
-            ),
+            GpuType::Vector(scalar, size) => match size {
+                0 => panic!("vector of size 0 is not well defined!"),
+                1 => format!(
+                    "    {}{} {} = buf.Load({});\n",
+                    scalar.hlsl_typename(),
+                    size,
+                    package_fieldname,
+                    hlsl_get_ref_plus_offset(current_offset)
+                ),
+                _ => format!(
+                    "    {}{} {} = buf.Load{}({});\n",
+                    scalar.hlsl_typename(),
+                    size,
+                    package_fieldname,
+                    size,
+                    hlsl_get_ref_plus_offset(current_offset)
+                ),
+            },
             GpuType::InlineStruct(isn) => format!(
                 "    {} {} = {}_read({});\n",
                 isn,
@@ -271,14 +279,14 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                                 );
                             write!(
                                 unpacker,
-                                "uint{} {}_unpack_{}(uint{} {}) {{\n    {}{} result;\n\n",
+                                "inline uint{} {}_unpack_{}(uint{} {}) {{\n    {}{} result;\n\n",
                                 unpacked_size,
                                 name,
                                 unpacked_fieldname,
                                 num_uints_required_for_storage,
                                 package_fieldname,
                                 hlsl_type,
-                                num_uints_required_for_storage,
+                                unpacked_size,
                             )
                                 .unwrap();
 
@@ -951,7 +959,7 @@ impl GpuTypeDef {
                 write!(r, "}};\n").unwrap();
                 write!(
                     r,
-                    "uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
+                    "inline uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
                     en.name, rn
                 )
                     .unwrap();
@@ -1106,8 +1114,8 @@ pub fn piet_hlsl(input: TokenStream) -> TokenStream {
     let gen_hlsl_fn = format_ident!("gen_hlsl_{}", input.ident);
     let result = module.to_hlsl();
     let expanded = quote! {
-        fn #gen_hlsl_fn() {
-            println!("{}", #result);
+        fn #gen_hlsl_fn() -> String{
+            String::from(#result)
         }
     };
     expanded.into()

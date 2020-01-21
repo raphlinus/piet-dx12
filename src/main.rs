@@ -16,50 +16,6 @@ pub mod window;
 #[macro_use]
 extern crate piet_hlsl_derive;
 
-
-
-piet_hlsl! {
-    mod scene {
-        struct SomeThing0 {
-            x: u16,
-            y: u16,
-        }
-
-        struct SomeThing1 {
-            a: u8,
-            b: u8,
-            c: u8,
-            d: u8,
-        }
-
-        struct InSceneBbox {
-            x_lims: [u16; 2],
-            y_lims: [u16; 2],
-        }
-
-        struct PietGlyph {
-            in_atlas_bbox: [u16; 4],
-            color: [u8; 4],
-        }
-
-        struct PietCircle {
-            radius: u16,
-            color: [u8; 4],
-        }
-
-        enum PietItem {
-            Circle(PietCircle),
-            Glyph(PietGlyph),
-        }
-    }
-}
-
-fn main() {
-    //foo();
-    gen_hlsl_scene();
-}
-
-/*
 extern crate font_rs;
 extern crate kurbo;
 extern crate piet;
@@ -78,9 +34,9 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::hash::Hash;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -580,82 +536,114 @@ fn populate_render_context(
     }
 }
 
-fn main() {
-    unsafe {
-        println!("creating window...");
-        let wnd = window::Window::new(win32_string("test"), win32_string("test"));
-        let screen_size = Rect {
-            x0: 0.0,
-            x1: wnd.get_width() as f64,
-            y0: 0.0,
-            y1: wnd.get_height() as f64,
-        };
-
-        let num_circles: u32 = 500;
-        let num_strings: u32 = 500;
-
-        let num_renders: u32 = 1000;
-        let atlas_width: u16 = 512;
-        let atlas_height: u16 = 512;
-        let tile_side_length_in_pixels: u32 = 16;
-        // longest possible text string is "very piet", which contains 8 non-whitespace glyphs
-        let max_objects_in_scene: u32 = num_circles + num_strings * 8;
-
-        let mut gpu_state = gpu::GpuState::new(
-            &wnd,
-            String::from("build_per_tile_command_list"),
-            String::from("paint_objects"),
-            String::from("VSMain"),
-            String::from("PSMain"),
-            max_objects_in_scene,
-            tile_side_length_in_pixels,
-            32,
-            1,
-            1,
-            1,
-            atlas_width as u64,
-            atlas_height as u32,
-            (atlas_width as u64) * (atlas_height as u64),
-            num_renders,
-        );
-
-        let scene_circles = generate_random_circles(num_circles, screen_size);
-        let scene_text = generate_random_text(num_strings, screen_size);
-        //let scene_circles= Vec::<(kurbo::Circle, DX12Brush)>::new();
-        //let scene_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
-        //let scene_text = generate_test_text();
-        let raw_font_generator = Arc::new(RawFontGenerator::load_notomono());
-
-        for i in 0..num_renders {
-            let mut render_context = DX12RenderContext::new(atlas_width, atlas_height);
-            populate_render_context(
-                &mut render_context,
-                &raw_font_generator,
-                &scene_circles,
-                &scene_text,
-            );
-
-            let num_objects_in_scene = u32::try_from(render_context.scene.objects.len())
-                .expect("cannot store number of objects in scene as u32");
-            let object_data = render_context.scene.to_bytes();
-
-            gpu_state.upload_data(
-                Some(num_objects_in_scene),
-                Some(object_data),
-                Some(
-                    &render_context
-                        .atlas
-                        .lock()
-                        .expect("atlas is poisoned")
-                        .bytes,
-                ),
-            );
-
-            gpu_state.render(i);
+piet_hlsl! {
+    mod scene {
+        struct InSceneBbox {
+            x_lims: [u16; 2],
+            y_lims: [u16; 2],
         }
 
-        gpu_state.print_stats();
-        gpu_state.destroy();
+        struct PietGlyph {
+            in_atlas_bbox: [u16; 4],
+            color: [u8; 4],
+        }
+
+        struct PietCircle {
+            radius: u16,
+            color: [u8; 4],
+        }
+
+        enum PietItem {
+            Circle(PietCircle),
+            Glyph(PietGlyph),
+        }
     }
 }
-*/
+
+fn main() {
+    {
+        let gpu_side_code: String = gen_hlsl_scene();
+        let shader_folder = Path::new("shaders");
+        let loaders_and_unpackers_fp = shader_folder.join(Path::new("loaders_and_unpackers.hlsl"));
+        let mut f = File::create(loaders_and_unpackers_fp).unwrap();
+        f.write_all(gpu_side_code.as_bytes()).unwrap();
+        f.sync_all().unwrap();
+    }
+
+//    unsafe {
+//        println!("creating window...");
+//        let wnd = window::Window::new(win32_string("test"), win32_string("test"));
+//        let screen_size = Rect {
+//            x0: 0.0,
+//            x1: wnd.get_width() as f64,
+//            y0: 0.0,
+//            y1: wnd.get_height() as f64,
+//        };
+//
+//        let num_circles: u32 = 500;
+//        let num_strings: u32 = 500;
+//
+//        let num_renders: u32 = 1000;
+//        let atlas_width: u16 = 512;
+//        let atlas_height: u16 = 512;
+//        let tile_side_length_in_pixels: u32 = 16;
+//        // longest possible text string is "very piet", which contains 8 non-whitespace glyphs
+//        let max_objects_in_scene: u32 = num_circles + num_strings * 8;
+//
+//        let mut gpu_state = gpu::GpuState::new(
+//            &wnd,
+//            String::from("build_per_tile_command_list"),
+//            String::from("paint_objects"),
+//            String::from("VSMain"),
+//            String::from("PSMain"),
+//            max_objects_in_scene,
+//            tile_side_length_in_pixels,
+//            32,
+//            1,
+//            1,
+//            1,
+//            atlas_width as u64,
+//            atlas_height as u32,
+//            (atlas_width as u64) * (atlas_height as u64),
+//            num_renders,
+//        );
+//
+//        let scene_circles = generate_random_circles(num_circles, screen_size);
+//        let scene_text = generate_random_text(num_strings, screen_size);
+//        //let scene_circles= Vec::<(kurbo::Circle, DX12Brush)>::new();
+//        //let scene_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
+//        //let scene_text = generate_test_text();
+//        let raw_font_generator = Arc::new(RawFontGenerator::load_notomono());
+//
+//        for i in 0..num_renders {
+//            let mut render_context = DX12RenderContext::new(atlas_width, atlas_height);
+//            populate_render_context(
+//                &mut render_context,
+//                &raw_font_generator,
+//                &scene_circles,
+//                &scene_text,
+//            );
+//
+//            let num_objects_in_scene = u32::try_from(render_context.scene.objects.len())
+//                .expect("cannot store number of objects in scene as u32");
+//            let object_data = render_context.scene.to_bytes();
+//
+//            gpu_state.upload_data(
+//                Some(num_objects_in_scene),
+//                Some(object_data),
+//                Some(
+//                    &render_context
+//                        .atlas
+//                        .lock()
+//                        .expect("atlas is poisoned")
+//                        .bytes,
+//                ),
+//            );
+//
+//            gpu_state.render(i);
+//        }
+//
+//        gpu_state.print_stats();
+//        gpu_state.destroy();
+//    }
+}

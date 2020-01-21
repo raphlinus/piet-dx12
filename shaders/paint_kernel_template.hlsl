@@ -28,8 +28,7 @@ cbuffer DataSpecificationConstants : register(b2)
 Texture2D<float> glyph_atlas : register(t2);
 RWTexture2D<float4> canvas : register(u1);
 
-#include "C:/Users/bhmer/Desktop/piet-dx12/shaders/command_loaders.hlsl"
-#include "C:/Users/bhmer/Desktop/piet-dx12/shaders/unpack.hlsl"
+#include "shaders/decoder.hlsl"
 
 bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     uint px = pixel_pos.x;
