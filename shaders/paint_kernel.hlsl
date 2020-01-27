@@ -6,39 +6,331 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-ByteAddressBuffer per_tile_command_list: register(t1);
+ByteAddressBuffer per_tile_command_list: register(t2);
 
 cbuffer SceneConstants: register(b0) {
-    uint num_objects_in_scene;
+    uint num_items;
 };
 
 cbuffer GpuStateConstants : register(b1)
 {
-    uint max_objects_in_scene;
-	uint tile_side_length_in_pixels;
+    uint max_items_scene;
+	uint tile_side_length;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
-cbuffer DataSpecificationConstants : register(b2)
-{
-    uint object_size;
-    uint init_in_scene_bbox_address;
-    uint init_general_data_address;
-    uint init_in_atlas_bbox_address;
-    uint init_color_data_address;
-    uint bbox_data_size;
-    uint general_data_size;
-    uint color_data_size;
-}
-
-Texture2D<float> glyph_atlas : register(t2);
+Texture2D<float> glyph_atlas : register(t3);
 RWTexture2D<float4> canvas : register(u1);
 
-#include "C:/Users/bhmer/Desktop/piet-dx12/shaders/command_loaders.hlsl"
-#include "C:/Users/bhmer/Desktop/piet-dx12/shaders/unpack.hlsl"
+inline uint extract_8bit_value(uint bit_shift, uint package) {
+    uint mask = 255;
+    uint result = (package >> bit_shift) & mask;
 
-bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
+    return result;
+}
+
+inline uint extract_16bit_value(uint bit_shift, uint package) {
+    uint mask = 65535;
+    uint result = (package >> bit_shift) & mask;
+
+    return result;
+}
+
+typedef uint BBoxRef;
+typedef uint BBoxPackedRef;
+typedef uint SRGBColorRef;
+typedef uint SRGBColorPackedRef;
+typedef uint PietGlyphRef;
+typedef uint PietGlyphPackedRef;
+typedef uint PietCircleRef;
+typedef uint PietCirclePackedRef;
+typedef uint PietItemRef;
+
+struct BBoxPacked {
+    uint x_min_x_max;
+    uint y_min_y_max;
+};
+
+inline BBoxPacked BBoxPacked_read(ByteAddressBuffer buf, BBoxPackedRef ref) {
+    BBoxPacked result;
+
+    uint x_min_x_max = buf.Load(ref);
+    result.x_min_x_max = x_min_x_max;
+
+    uint y_min_y_max = buf.Load(ref + 4);
+    result.y_min_y_max = y_min_y_max;
+
+    return result;
+}
+
+inline uint BBoxPacked_x_min_x_max(ByteAddressBuffer buf, BBoxPackedRef ref) {
+    uint x_min_x_max = buf.Load(ref);
+    return x_min_x_max;
+}
+
+inline uint BBoxPacked_y_min_y_max(ByteAddressBuffer buf, BBoxPackedRef ref) {
+    uint y_min_y_max = buf.Load(ref + 4);
+    return y_min_y_max;
+}
+
+inline uint BBoxPacked_unpack_x_min(uint x_min_x_max) {
+    uint result;
+
+    result = extract_16bit_value(16, x_min_x_max);
+    return result;
+}
+
+inline uint BBoxPacked_unpack_x_max(uint x_min_x_max) {
+    uint result;
+
+    result = extract_16bit_value(0, x_min_x_max);
+    return result;
+}
+
+inline uint BBoxPacked_unpack_y_min(uint y_min_y_max) {
+    uint result;
+
+    result = extract_16bit_value(16, y_min_y_max);
+    return result;
+}
+
+inline uint BBoxPacked_unpack_y_max(uint y_min_y_max) {
+    uint result;
+
+    result = extract_16bit_value(0, y_min_y_max);
+    return result;
+}
+
+struct BBox {
+    uint x_min;
+    uint x_max;
+    uint y_min;
+    uint y_max;
+};
+
+inline BBox BBoxPacked_unpack(BBoxPacked packed_form) {
+    BBox result;
+
+    result.x_min = BBoxPacked_unpack_x_min(packed_form.x_min_x_max);
+    result.x_max = BBoxPacked_unpack_x_max(packed_form.x_min_x_max);
+    result.y_min = BBoxPacked_unpack_y_min(packed_form.y_min_y_max);
+    result.y_max = BBoxPacked_unpack_y_max(packed_form.y_min_y_max);
+
+    return result;
+}
+
+struct SRGBColorPacked {
+    uint r_g_b_a;
+};
+
+inline SRGBColorPacked SRGBColorPacked_read(ByteAddressBuffer buf, SRGBColorPackedRef ref) {
+    SRGBColorPacked result;
+
+    uint r_g_b_a = buf.Load(ref);
+    result.r_g_b_a = r_g_b_a;
+
+    return result;
+}
+
+inline uint SRGBColorPacked_r_g_b_a(ByteAddressBuffer buf, SRGBColorPackedRef ref) {
+    uint r_g_b_a = buf.Load(ref);
+    return r_g_b_a;
+}
+
+inline uint SRGBColorPacked_unpack_r(uint r_g_b_a) {
+    uint result;
+
+    result = extract_8bit_value(24, r_g_b_a);
+    return result;
+}
+
+inline uint SRGBColorPacked_unpack_g(uint r_g_b_a) {
+    uint result;
+
+    result = extract_8bit_value(16, r_g_b_a);
+    return result;
+}
+
+inline uint SRGBColorPacked_unpack_b(uint r_g_b_a) {
+    uint result;
+
+    result = extract_8bit_value(8, r_g_b_a);
+    return result;
+}
+
+inline uint SRGBColorPacked_unpack_a(uint r_g_b_a) {
+    uint result;
+
+    result = extract_8bit_value(0, r_g_b_a);
+    return result;
+}
+
+struct SRGBColor {
+    uint r;
+    uint g;
+    uint b;
+    uint a;
+};
+
+inline SRGBColor SRGBColorPacked_unpack(SRGBColorPacked packed_form) {
+    SRGBColor result;
+
+    result.r = SRGBColorPacked_unpack_r(packed_form.r_g_b_a);
+    result.g = SRGBColorPacked_unpack_g(packed_form.r_g_b_a);
+    result.b = SRGBColorPacked_unpack_b(packed_form.r_g_b_a);
+    result.a = SRGBColorPacked_unpack_a(packed_form.r_g_b_a);
+
+    return result;
+}
+
+struct PietGlyphPacked {
+    uint tag;
+    BBoxPacked scene_bbox;
+    BBoxPacked atlas_bbox;
+    SRGBColorPacked color;
+};
+
+inline PietGlyphPacked PietGlyphPacked_read(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
+    PietGlyphPacked result;
+
+    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+    result.scene_bbox = scene_bbox;
+
+    BBoxPacked atlas_bbox = BBoxPacked_read(buf, ref + 12);
+    result.atlas_bbox = atlas_bbox;
+
+    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 20);
+    result.color = color;
+
+    return result;
+}
+
+inline BBoxPacked PietGlyphPacked_scene_bbox(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
+    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+    return scene_bbox;
+}
+
+inline BBoxPacked PietGlyphPacked_atlas_bbox(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
+    BBoxPacked atlas_bbox = BBoxPacked_read(buf, ref + 12);
+    return atlas_bbox;
+}
+
+inline SRGBColorPacked PietGlyphPacked_color(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
+    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 20);
+    return color;
+}
+
+struct PietGlyph {
+    BBox scene_bbox;
+    BBox atlas_bbox;
+    SRGBColor color;
+};
+
+inline PietGlyph PietGlyphPacked_unpack(PietGlyphPacked packed_form) {
+    PietGlyph result;
+
+    result.scene_bbox = BBoxPacked_unpack(packed_form.scene_bbox);
+    result.atlas_bbox = BBoxPacked_unpack(packed_form.atlas_bbox);
+    result.color = SRGBColorPacked_unpack(packed_form.color);
+
+    return result;
+}
+
+struct PietCirclePacked {
+    uint tag;
+    BBoxPacked scene_bbox;
+    SRGBColorPacked color;
+};
+
+inline PietCirclePacked PietCirclePacked_read(ByteAddressBuffer buf, PietCirclePackedRef ref) {
+    PietCirclePacked result;
+
+    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+    result.scene_bbox = scene_bbox;
+
+    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 12);
+    result.color = color;
+
+    return result;
+}
+
+inline BBoxPacked PietCirclePacked_scene_bbox(ByteAddressBuffer buf, PietCirclePackedRef ref) {
+    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+    return scene_bbox;
+}
+
+inline SRGBColorPacked PietCirclePacked_color(ByteAddressBuffer buf, PietCirclePackedRef ref) {
+    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 12);
+    return color;
+}
+
+struct PietCircle {
+    BBox scene_bbox;
+    SRGBColor color;
+};
+
+inline PietCircle PietCirclePacked_unpack(PietCirclePacked packed_form) {
+    PietCircle result;
+
+    result.scene_bbox = BBoxPacked_unpack(packed_form.scene_bbox);
+    result.color = SRGBColorPacked_unpack(packed_form.color);
+
+    return result;
+}
+
+struct PietItem {
+    uint tag;
+    uint body[5];
+};
+inline uint PietItem_tag(ByteAddressBuffer buf, PietItemRef ref) {
+    uint result = buf.Load(ref);
+    return result;
+}
+
+inline void PietItem_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {
+    uint4 group0 = src.Load4(src_ref);
+    dst.Store4(dst_ref, group0);
+
+    uint2 group1 = src.Load2(src_ref + 16);
+    dst.Store2(dst_ref + 16, group1);
+}
+
+#define BBOX_SIZE 8
+#define SRGBCOLOR_SIZE 4
+#define PIET_ITEM_SIZE 24
+#define PietItem_Circle 0
+#define PietItem_Glyph 1
+
+
+bool bbox_interiors_intersect(BBox bbox0, BBox bbox1) {
+    bool x_intersection = (bbox0.x_max >= bbox1.x_min && bbox1.x_max >= bbox0.x_min);
+    bool y_intersection = (bbox0.y_max >= bbox1.y_min && bbox1.y_max >= bbox0.y_min);
+
+    bool intersection = x_intersection && y_intersection;
+
+    return intersection;
+}
+
+BBox generate_tile_bbox(uint2 tile_coord) {
+    uint tile_x_ix = tile_coord.x;
+    uint tile_y_ix = tile_coord.y;
+
+    uint left = tile_side_length*tile_x_ix;
+    uint top = tile_side_length*tile_y_ix;
+    uint right = left + tile_side_length;
+    uint bot = top + tile_side_length;
+
+    BBox result;
+    result.x_min = left;
+    result.x_max = right;
+    result.y_min = top;
+    result.y_max = bot;
+    return result;
+}
+
+
+bool is_pixel_in_bbox(uint2 pixel_pos, BBox bbox) {
     uint px = pixel_pos.x;
     uint py = pixel_pos.y;
 
@@ -46,10 +338,10 @@ bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     // warning X4000: use of potentially uninitialized variable
     bool result = 0;
 
-    uint left = bbox[0];
-    uint right = bbox[1];
-    uint top = bbox[2];
-    uint bot = bbox[3];
+    uint left = bbox.x_min;
+    uint right = bbox.x_max;
+    uint top = bbox.y_min;
+    uint bot = bbox.y_max;
 
     if (left <= px && px <= right) {
         if (top <= py && py <= bot) {
@@ -60,41 +352,19 @@ bool is_pixel_in_bbox(uint2 pixel_pos, uint4 bbox) {
     return result;
 }
 
-bool is_pixel_in_rect(uint2 pixel_pos, uint2 origin, uint2 size) {
-    uint px = pixel_pos.x;
-    uint py = pixel_pos.y;
-    uint left = origin.x;
-    uint right = origin.x + size.x;
-    uint top = origin.y - size.y;
-    uint bot = origin.y;
+float circle_alpha(uint2 pixel_pos, BBox circle_bbox, float color_alpha) {
+    uint2 circle_center = {lerp(circle_bbox.x_min, circle_bbox.x_max, 0.5), lerp(circle_bbox.y_min, circle_bbox.y_max, 0.5)};
+    float radius = (circle_bbox.x_max - circle_bbox.x_min)*0.5;
+    float d = distance(pixel_pos, circle_center);
+    float position_alpha = clamp(radius - d, 0.0, 1.0);
 
-    bool result = 1;
-
-    if (px < left || py > bot || py < top || px > right) {
-        result = 0;
-    }
-
-    return result;
-}
-
-float circle_shader(uint2 pixel_pos, uint2 center_pos, float radius) {
-    float d = distance(pixel_pos, center_pos);
-    float alpha = clamp(radius - d, 0.0, 1.0);
-    return alpha;
-}
-
-float calculate_pixel_alpha_due_to_circle(uint2 pixel_pos, uint4 circle_bbox, float color_alpha) {
-    uint2 circle_center = {lerp(circle_bbox[0], circle_bbox[1], 0.5), lerp(circle_bbox[2], circle_bbox[3], 0.5)};
-    float radius = (circle_bbox[1] - circle_bbox[0])*0.5;
-    float position_based_alpha = circle_shader(pixel_pos, circle_center, radius);
-
-    float pixel_alpha = color_alpha*position_based_alpha;
+    float pixel_alpha = color_alpha*position_alpha;
 
     return pixel_alpha;
 }
 
-float calculate_pixel_alpha_due_to_glyph(uint2 pixel_pos, uint4 in_atlas_bbox, uint4 in_scene_bbox, float color_alpha) {
-    uint2 atlas_pixel_pos = {in_atlas_bbox[0] + (pixel_pos.x - in_scene_bbox[0]), in_atlas_bbox[2] + (pixel_pos.y - in_scene_bbox[2])};
+float glyph_alpha(uint2 pixel_pos, BBox scene_bbox, BBox atlas_bbox, float color_alpha) {
+    uint2 atlas_pixel_pos = {atlas_bbox.x_min + (pixel_pos.x - scene_bbox.x_min), atlas_bbox.y_min + (pixel_pos.y - scene_bbox.y_min)};
     float glyph_alpha = glyph_atlas[atlas_pixel_pos];
 
     float pixel_alpha = color_alpha*glyph_alpha;
@@ -106,286 +376,87 @@ float4 blend_pd_over(float4 bg, float4 fg) {
     return lerp(bg, float4(fg.rgb, 1.0), fg.a);
 }
 
-// simple number printing
-bool get_digit_code_0(uint digit) {
-	if (digit == 5 || digit == 6) {
-		return 0;
-	}
-
-	return 1;
-}
-
-bool get_digit_code_1(uint digit) {
-	if (digit == 2) {
-		return 0;
-	}
-
-	return 1;
-}
-
-bool get_digit_code_2(uint digit) {
-	if (digit == 1 || digit == 4 || digit == 7) {
-		return 0;
-	}
-
-	return 1;
-}
-
-bool get_digit_code_3(uint digit) {
-	if (digit == 0 || digit == 2 || digit == 6 || digit == 8) {
-		return 1;
-	}
-
-	return 0;
-}
-
-bool get_digit_code_4(uint digit) {
-	if (digit == 1 || digit == 2 || digit == 3 || digit == 7) {
-		return 0;
-	}
-
-	return 1;
-}
-
-bool get_digit_code_5(uint digit) {
-	if (digit == 1 || digit == 4) {
-		return 0;
-	}
-
-	return 1;
-}
-
-bool get_digit_code_6(uint digit) {
-	if (digit == 0 || digit == 1 || digit == 7) {
-		return 0;
-	}
-
-	return 1;
-}
-
-float digit_display_shader(uint digit, uint2 pixel_pos, uint2 origin, uint2 size) {
-    uint2 reversed_size = size.yx;
-    uint2 og = {0, 0};
-
-    if (get_digit_code_0(digit)) {
-        og.x = origin.x + size.x - size.y;
-        og.y = origin.y - size.x;
-
-        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
-            return 1.0;
-        }
-    }
-
-    if (get_digit_code_1(digit)) {
-        og.x = origin.x + size.x - size.y;
-        og.y = origin.y;
-
-        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
-            return 1.0;
-        }
-    }
-
-    if (get_digit_code_2(digit)) {
-        og.x = origin.x;
-        og.y = origin.y;
-
-        if (is_pixel_in_rect(pixel_pos, og, size)) {
-            return 1.0;
-        }
-    }
-
-    if (get_digit_code_3(digit)) {
-        og.x = origin.x;
-        og.y = origin.y;
-
-        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
-            return 1.0;
-        }
-    }
-
-    if (get_digit_code_4(digit)) {
-        og.x = origin.x;
-        og.y = origin.y - size.x;
-
-        if (is_pixel_in_rect(pixel_pos, og, reversed_size)) {
-            return 1.0;
-        }
-    }
-
-    if (get_digit_code_5(digit)) {
-        og.x = origin.x;
-        og.y = origin.y - 2*size.x + size.y;
-
-        if (is_pixel_in_rect(pixel_pos, og, size)) {
-            return 1.0;
-        }
-    }
-
-    if (get_digit_code_6(digit)) {
-        og.x = origin.x;
-        og.y = origin.y - size.x + 0.5*size.y;
-
-        if (is_pixel_in_rect(pixel_pos, og, size)) {
-            return 1.0;
-        }
-    }
-
-    return 0.0;
-}
-
-float number_shader(uint number, uint2 pixel_pos, uint2 init_display_origin, uint2 size) {
-    uint2 display_origin = init_display_origin;
-    uint delta = size.x + 10;
-
-    uint num_digits = 0;
-    float fnumber = number;
-    float result = 0.0;
-
-    while (1) {
-        uint digit = round(fmod(fnumber, 10.0));
-
-        result = digit_display_shader(digit, pixel_pos, display_origin, size);
-
-        if (result > 0.0) {
-            break;
-        }
-
-        fnumber = trunc(fnumber/10.0);
-        display_origin.x = display_origin.x - delta;
-
-        if (fnumber == 0.0) {
-            break;
-        }
-    }
-
-    return result;
-}
-
-bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
-    uint right1 = bbox1[1];
-    uint left0 = bbox0[0];
-    uint left1 = bbox1[0];
-    uint right0 = bbox0[1];
-
-    bool result = 1;
-
-    if (right1 <= left0 || left1 >= right0) {
-        result = 0;
-    }
-
-    uint bot1 = bbox1[3];
-    uint top0 = bbox0[2];
-    uint top1 = bbox1[2];
-    uint bot0 = bbox0[3];
-
-    if (result && (bot1 <= top0 || top1 >= bot0)) {
-        result = 0;
-    }
-
-    return result;
-}
-
-uint4 generate_tile_bbox(uint2 tile_coord) {
-    uint tile_x_ix = tile_coord.x;
-    uint tile_y_ix = tile_coord.y;
-
-    uint left = tile_side_length_in_pixels*tile_x_ix;
-    uint top = tile_side_length_in_pixels*tile_y_ix;
-    uint right = left + tile_side_length_in_pixels;
-    uint bot = top + tile_side_length_in_pixels;
-
-    uint4 result = {left, right, top, bot};
-    return result;
-}
+#define NUM_CMD_OFFSET 4
 
 [numthreads(16, 16, 1)]
-void paint_objects(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
+void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
     float4 bg = {0.0, 0.0, 0.0, 0.0};
     float4 fg = {0.0, 0.0, 0.0, 0.0};
 
     uint2 pixel_pos = DTid.xy;
 
-    uint linear_tile_ix = Gid.y*num_tiles_x + Gid.x;
-    uint size_of_command_list = 4 + num_objects_in_scene*object_size;
-    uint num_commands_address = size_of_command_list*linear_tile_ix;
+    uint tile_ix = Gid.y*num_tiles_x + Gid.x;
+    uint cmd_list_size = NUM_CMD_OFFSET + num_items*PIET_ITEM_SIZE;
+    uint cmd_init_offset = cmd_list_size*tile_ix;
+    uint num_cmd = per_tile_command_list.Load(cmd_init_offset);
+    uint cmd_item_start = cmd_init_offset + NUM_CMD_OFFSET;
 
-    uint this_tile_num_commands = per_tile_command_list.Load(num_commands_address);
-
-    uint cmd_general_data_start = num_commands_address + 4;
-    uint cmd_in_scene_bbox_start = cmd_general_data_start + num_objects_in_scene*general_data_size;
-    uint cmd_in_atlas_bbox_start = cmd_in_scene_bbox_start + num_objects_in_scene*bbox_data_size;
-    uint cmd_color_start = cmd_in_atlas_bbox_start + num_objects_in_scene*bbox_data_size;
-
-    for (uint i = 0; i < this_tile_num_commands; i++) {
-        /**
+    /*
+    if (num_items == 2) {
         fg.g = 1.0;
         fg.a = 1.0;
-        bg = blend_pd_over(bg, fg);
-        **/
-
-        uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_from_cmd(cmd_in_scene_bbox_start + i*bbox_data_size);
-        uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
-
-        bool hit = is_pixel_in_bbox(pixel_pos, in_scene_bbox);
-
-        if (hit) {
-            uint packed_general_data = load_packed_general_data_from_cmd(cmd_general_data_start + i*general_data_size);
-            uint2 general_data = unpack_general_data(packed_general_data);
-            uint object_type = general_data.x;
-
-            uint packed_color = load_packed_color_from_cmd(cmd_color_start + i*color_data_size);
-            fg = extract_u8x4_normalized_by_255(packed_color);
-
-            if (object_type == 0) {
-                //float4 green = {0.0, 1.0, 0.0, 1.0};
-                fg.a = calculate_pixel_alpha_due_to_circle(pixel_pos, in_scene_bbox, fg.a);
-            } else {
-                //float4 blue = {0.0, 0.0, 1.0, 1.0};
-                uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_from_cmd(cmd_in_atlas_bbox_start + i*bbox_data_size);
-                uint4 in_atlas_bbox = unpack_bbox(packed_in_atlas_bbox);
-
-                fg.a = calculate_pixel_alpha_due_to_glyph(pixel_pos, in_atlas_bbox, in_scene_bbox, fg.a);
-            }
-
-            bg = blend_pd_over(bg, fg);
-        }
-    }
-    
-    /**
-    uint2 rect_origin = {200, 200};
-    uint2 rect_size = {50, 10};
-    fg.r = 1.0;
-    fg.g = 1.0;
-    fg.b = 1.0;
-    fg.a = 0.0;
-
-    uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_from_cmd(cmd_in_scene_bbox_start);
-    uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
-
-    uint packed_general_data = load_packed_general_data_from_cmd(cmd_general_data_start);
-    uint2 general_data = unpack_general_data(packed_general_data);
-    uint object_type = general_data.x;
-
-    uint packed_color = load_packed_color_from_cmd(cmd_color_start);
-    uint4 int_color = extract_u8x4_from_uint(packed_color);
-
-    fg.a = number_shader(int_color[0], pixel_pos, rect_origin, rect_size);
-
-    bg = blend_pd_over(bg, fg);
-    **/
-
-    /**
-    fg.r = 1.0;
-    fg.g = 0.0;
-    fg.b = 0.0;
-    fg.a = 0.0;
-
-    if (this_tile_num_commands > 0) {
+    } else {
+        fg.r = 1.0;
         fg.a = 1.0;
     }
+    */
 
-    bg = blend_pd_over(bg, fg);
-    **/
+    /*
+    for (uint i = 0; i < num_cmd; i++) {
+        uint item_offset = cmd_item_start + PIET_ITEM_SIZE*i;
+        uint tag = PietItem_tag(per_tile_command_list, item_offset);
+
+        PietCirclePacked packed_circle = PietCirclePacked_read(per_tile_command_list, cmd_item_start);
+        SRGBColor color = SRGBColorPacked_unpack(packed_circle.color);
+        BBox scene_bbox = BBoxPacked_unpack(packed_circle.scene_bbox);
+
+        if (tag == PietItem_Circle) {
+            fg.g = 1.0;
+            fg.a = 0.5;
+        } else {
+            fg.r = 1.0;
+            fg.a = 0.5;
+        }
+
+        bg = blend_pd_over(bg, fg);
+    }
+    */
+
+    for (uint i = 0; i < num_cmd; i++) {
+        uint item_offset = cmd_item_start + PIET_ITEM_SIZE*i;
+        uint tag = PietItem_tag(per_tile_command_list, item_offset);
+
+        if (tag == PietItem_Circle) {
+            BBoxPacked packed_scene_bbox = PietCirclePacked_scene_bbox(per_tile_command_list, item_offset);
+            BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
+            SRGBColorPacked packed_color = PietCirclePacked_color(per_tile_command_list, item_offset);
+            SRGBColor color = SRGBColorPacked_unpack(packed_color);
+
+            fg.r = color.r/255.0;
+            fg.g = color.g/255.0;
+            fg.b = color.b/255.0;
+            fg.a = color.a/255.0;
+            fg.a = circle_alpha(pixel_pos, scene_bbox, color.a/255.0);
+            bg = blend_pd_over(bg, fg);
+        } else if (tag == PietItem_Glyph) {
+            BBoxPacked packed_scene_bbox = PietGlyphPacked_scene_bbox(per_tile_command_list, item_offset);
+            BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
+
+            if (is_pixel_in_bbox(pixel_pos, scene_bbox)) {
+                BBoxPacked packed_atlas_bbox = PietGlyphPacked_atlas_bbox(per_tile_command_list, item_offset);
+                BBox atlas_bbox = BBoxPacked_unpack(packed_atlas_bbox);
+
+                SRGBColorPacked packed_color = PietGlyphPacked_color(per_tile_command_list, item_offset);
+                SRGBColor color = SRGBColorPacked_unpack(packed_color);
+
+                fg.r = color.r/255.0;
+                fg.g = color.g/255.0;
+                fg.b = color.b/255.0;
+                fg.a = glyph_alpha(pixel_pos, scene_bbox, atlas_bbox, color.a/255.0);
+                bg = blend_pd_over(bg, fg);
+            }
+        }
+    }
 
     canvas[DTid.xy] = bg;
 }
