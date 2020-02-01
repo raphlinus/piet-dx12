@@ -49,8 +49,8 @@ void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
     BBox tile_bbox = generate_tile_bbox(DTid.xy);
 
     for (uint i = 0; i < num_items; i++) {
-        BBoxPacked packed_scene_bbox = BBoxPacked_read(item_scene_bboxes, item_bbox_offset);
-        BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
+        BBoxPacked packed_scene_bbox = BBox_read(item_scene_bboxes, item_bbox_offset);
+        BBox scene_bbox = BBox_unpack(packed_scene_bbox);
         bool hit = bbox_interiors_intersect(scene_bbox, tile_bbox);
 
         if (hit) {

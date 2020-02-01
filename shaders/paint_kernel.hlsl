@@ -38,13 +38,9 @@ inline uint extract_16bit_value(uint bit_shift, uint package) {
 }
 
 typedef uint BBoxRef;
-typedef uint BBoxPackedRef;
 typedef uint SRGBColorRef;
-typedef uint SRGBColorPackedRef;
 typedef uint PietGlyphRef;
-typedef uint PietGlyphPackedRef;
 typedef uint PietCircleRef;
-typedef uint PietCirclePackedRef;
 typedef uint PietItemRef;
 
 struct BBoxPacked {
@@ -52,7 +48,7 @@ struct BBoxPacked {
     uint y_min_y_max;
 };
 
-inline BBoxPacked BBoxPacked_read(ByteAddressBuffer buf, BBoxPackedRef ref) {
+inline BBoxPacked BBox_read(ByteAddressBuffer buf, BBoxRef ref) {
     BBoxPacked result;
 
     uint x_min_x_max = buf.Load(ref);
@@ -64,41 +60,41 @@ inline BBoxPacked BBoxPacked_read(ByteAddressBuffer buf, BBoxPackedRef ref) {
     return result;
 }
 
-inline uint BBoxPacked_x_min_x_max(ByteAddressBuffer buf, BBoxPackedRef ref) {
+inline uint BBox_x_min_x_max(ByteAddressBuffer buf, BBoxRef ref) {
     uint x_min_x_max = buf.Load(ref);
     return x_min_x_max;
 }
 
-inline uint BBoxPacked_y_min_y_max(ByteAddressBuffer buf, BBoxPackedRef ref) {
+inline uint BBox_y_min_y_max(ByteAddressBuffer buf, BBoxRef ref) {
     uint y_min_y_max = buf.Load(ref + 4);
     return y_min_y_max;
 }
 
-inline uint BBoxPacked_unpack_x_min(uint x_min_x_max) {
-    uint result;
-
-    result = extract_16bit_value(16, x_min_x_max);
-    return result;
-}
-
-inline uint BBoxPacked_unpack_x_max(uint x_min_x_max) {
+inline uint BBox_unpack_x_min(uint x_min_x_max) {
     uint result;
 
     result = extract_16bit_value(0, x_min_x_max);
     return result;
 }
 
-inline uint BBoxPacked_unpack_y_min(uint y_min_y_max) {
+inline uint BBox_unpack_x_max(uint x_min_x_max) {
     uint result;
 
-    result = extract_16bit_value(16, y_min_y_max);
+    result = extract_16bit_value(16, x_min_x_max);
     return result;
 }
 
-inline uint BBoxPacked_unpack_y_max(uint y_min_y_max) {
+inline uint BBox_unpack_y_min(uint y_min_y_max) {
     uint result;
 
     result = extract_16bit_value(0, y_min_y_max);
+    return result;
+}
+
+inline uint BBox_unpack_y_max(uint y_min_y_max) {
+    uint result;
+
+    result = extract_16bit_value(16, y_min_y_max);
     return result;
 }
 
@@ -109,13 +105,13 @@ struct BBox {
     uint y_max;
 };
 
-inline BBox BBoxPacked_unpack(BBoxPacked packed_form) {
+inline BBox BBox_unpack(BBoxPacked packed_form) {
     BBox result;
 
-    result.x_min = BBoxPacked_unpack_x_min(packed_form.x_min_x_max);
-    result.x_max = BBoxPacked_unpack_x_max(packed_form.x_min_x_max);
-    result.y_min = BBoxPacked_unpack_y_min(packed_form.y_min_y_max);
-    result.y_max = BBoxPacked_unpack_y_max(packed_form.y_min_y_max);
+    result.x_min = BBox_unpack_x_min(packed_form.x_min_x_max);
+    result.x_max = BBox_unpack_x_max(packed_form.x_min_x_max);
+    result.y_min = BBox_unpack_y_min(packed_form.y_min_y_max);
+    result.y_max = BBox_unpack_y_max(packed_form.y_min_y_max);
 
     return result;
 }
@@ -124,7 +120,7 @@ struct SRGBColorPacked {
     uint r_g_b_a;
 };
 
-inline SRGBColorPacked SRGBColorPacked_read(ByteAddressBuffer buf, SRGBColorPackedRef ref) {
+inline SRGBColorPacked SRGBColor_read(ByteAddressBuffer buf, SRGBColorRef ref) {
     SRGBColorPacked result;
 
     uint r_g_b_a = buf.Load(ref);
@@ -133,36 +129,36 @@ inline SRGBColorPacked SRGBColorPacked_read(ByteAddressBuffer buf, SRGBColorPack
     return result;
 }
 
-inline uint SRGBColorPacked_r_g_b_a(ByteAddressBuffer buf, SRGBColorPackedRef ref) {
+inline uint SRGBColor_r_g_b_a(ByteAddressBuffer buf, SRGBColorRef ref) {
     uint r_g_b_a = buf.Load(ref);
     return r_g_b_a;
 }
 
-inline uint SRGBColorPacked_unpack_r(uint r_g_b_a) {
+inline uint SRGBColor_unpack_r(uint r_g_b_a) {
     uint result;
 
-    result = extract_8bit_value(24, r_g_b_a);
+    result = extract_8bit_value(0, r_g_b_a);
     return result;
 }
 
-inline uint SRGBColorPacked_unpack_g(uint r_g_b_a) {
-    uint result;
-
-    result = extract_8bit_value(16, r_g_b_a);
-    return result;
-}
-
-inline uint SRGBColorPacked_unpack_b(uint r_g_b_a) {
+inline uint SRGBColor_unpack_g(uint r_g_b_a) {
     uint result;
 
     result = extract_8bit_value(8, r_g_b_a);
     return result;
 }
 
-inline uint SRGBColorPacked_unpack_a(uint r_g_b_a) {
+inline uint SRGBColor_unpack_b(uint r_g_b_a) {
     uint result;
 
-    result = extract_8bit_value(0, r_g_b_a);
+    result = extract_8bit_value(16, r_g_b_a);
+    return result;
+}
+
+inline uint SRGBColor_unpack_a(uint r_g_b_a) {
+    uint result;
+
+    result = extract_8bit_value(24, r_g_b_a);
     return result;
 }
 
@@ -173,13 +169,13 @@ struct SRGBColor {
     uint a;
 };
 
-inline SRGBColor SRGBColorPacked_unpack(SRGBColorPacked packed_form) {
+inline SRGBColor SRGBColor_unpack(SRGBColorPacked packed_form) {
     SRGBColor result;
 
-    result.r = SRGBColorPacked_unpack_r(packed_form.r_g_b_a);
-    result.g = SRGBColorPacked_unpack_g(packed_form.r_g_b_a);
-    result.b = SRGBColorPacked_unpack_b(packed_form.r_g_b_a);
-    result.a = SRGBColorPacked_unpack_a(packed_form.r_g_b_a);
+    result.r = SRGBColor_unpack_r(packed_form.r_g_b_a);
+    result.g = SRGBColor_unpack_g(packed_form.r_g_b_a);
+    result.b = SRGBColor_unpack_b(packed_form.r_g_b_a);
+    result.a = SRGBColor_unpack_a(packed_form.r_g_b_a);
 
     return result;
 }
@@ -191,33 +187,33 @@ struct PietGlyphPacked {
     SRGBColorPacked color;
 };
 
-inline PietGlyphPacked PietGlyphPacked_read(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
+inline PietGlyphPacked PietGlyph_read(ByteAddressBuffer buf, PietGlyphRef ref) {
     PietGlyphPacked result;
 
-    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+    BBoxPacked scene_bbox = BBox_read(buf, ref + 4);
     result.scene_bbox = scene_bbox;
 
-    BBoxPacked atlas_bbox = BBoxPacked_read(buf, ref + 12);
+    BBoxPacked atlas_bbox = BBox_read(buf, ref + 12);
     result.atlas_bbox = atlas_bbox;
 
-    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 20);
+    SRGBColorPacked color = SRGBColor_read(buf, ref + 20);
     result.color = color;
 
     return result;
 }
 
-inline BBoxPacked PietGlyphPacked_scene_bbox(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
-    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+inline BBoxPacked PietGlyph_scene_bbox(ByteAddressBuffer buf, PietGlyphRef ref) {
+    BBoxPacked scene_bbox = BBox_read(buf, ref + 4);
     return scene_bbox;
 }
 
-inline BBoxPacked PietGlyphPacked_atlas_bbox(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
-    BBoxPacked atlas_bbox = BBoxPacked_read(buf, ref + 12);
+inline BBoxPacked PietGlyph_atlas_bbox(ByteAddressBuffer buf, PietGlyphRef ref) {
+    BBoxPacked atlas_bbox = BBox_read(buf, ref + 12);
     return atlas_bbox;
 }
 
-inline SRGBColorPacked PietGlyphPacked_color(ByteAddressBuffer buf, PietGlyphPackedRef ref) {
-    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 20);
+inline SRGBColorPacked PietGlyph_color(ByteAddressBuffer buf, PietGlyphRef ref) {
+    SRGBColorPacked color = SRGBColor_read(buf, ref + 20);
     return color;
 }
 
@@ -227,12 +223,12 @@ struct PietGlyph {
     SRGBColor color;
 };
 
-inline PietGlyph PietGlyphPacked_unpack(PietGlyphPacked packed_form) {
+inline PietGlyph PietGlyph_unpack(PietGlyphPacked packed_form) {
     PietGlyph result;
 
-    result.scene_bbox = BBoxPacked_unpack(packed_form.scene_bbox);
-    result.atlas_bbox = BBoxPacked_unpack(packed_form.atlas_bbox);
-    result.color = SRGBColorPacked_unpack(packed_form.color);
+    result.scene_bbox = BBox_unpack(packed_form.scene_bbox);
+    result.atlas_bbox = BBox_unpack(packed_form.atlas_bbox);
+    result.color = SRGBColor_unpack(packed_form.color);
 
     return result;
 }
@@ -243,25 +239,25 @@ struct PietCirclePacked {
     SRGBColorPacked color;
 };
 
-inline PietCirclePacked PietCirclePacked_read(ByteAddressBuffer buf, PietCirclePackedRef ref) {
+inline PietCirclePacked PietCircle_read(ByteAddressBuffer buf, PietCircleRef ref) {
     PietCirclePacked result;
 
-    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+    BBoxPacked scene_bbox = BBox_read(buf, ref + 4);
     result.scene_bbox = scene_bbox;
 
-    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 12);
+    SRGBColorPacked color = SRGBColor_read(buf, ref + 12);
     result.color = color;
 
     return result;
 }
 
-inline BBoxPacked PietCirclePacked_scene_bbox(ByteAddressBuffer buf, PietCirclePackedRef ref) {
-    BBoxPacked scene_bbox = BBoxPacked_read(buf, ref + 4);
+inline BBoxPacked PietCircle_scene_bbox(ByteAddressBuffer buf, PietCircleRef ref) {
+    BBoxPacked scene_bbox = BBox_read(buf, ref + 4);
     return scene_bbox;
 }
 
-inline SRGBColorPacked PietCirclePacked_color(ByteAddressBuffer buf, PietCirclePackedRef ref) {
-    SRGBColorPacked color = SRGBColorPacked_read(buf, ref + 12);
+inline SRGBColorPacked PietCircle_color(ByteAddressBuffer buf, PietCircleRef ref) {
+    SRGBColorPacked color = SRGBColor_read(buf, ref + 12);
     return color;
 }
 
@@ -270,11 +266,11 @@ struct PietCircle {
     SRGBColor color;
 };
 
-inline PietCircle PietCirclePacked_unpack(PietCirclePacked packed_form) {
+inline PietCircle PietCircle_unpack(PietCirclePacked packed_form) {
     PietCircle result;
 
-    result.scene_bbox = BBoxPacked_unpack(packed_form.scene_bbox);
-    result.color = SRGBColorPacked_unpack(packed_form.color);
+    result.scene_bbox = BBox_unpack(packed_form.scene_bbox);
+    result.color = SRGBColor_unpack(packed_form.color);
 
     return result;
 }
@@ -406,9 +402,9 @@ void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
         uint item_offset = cmd_item_start + PIET_ITEM_SIZE*i;
         uint tag = PietItem_tag(per_tile_command_list, item_offset);
 
-        PietCirclePacked packed_circle = PietCirclePacked_read(per_tile_command_list, cmd_item_start);
-        SRGBColor color = SRGBColorPacked_unpack(packed_circle.color);
-        BBox scene_bbox = BBoxPacked_unpack(packed_circle.scene_bbox);
+        PietCirclePacked packed_circle = PietCircle_read(per_tile_command_list, cmd_item_start);
+        SRGBColor color = SRGBColor_unpack(packed_circle.color);
+        BBox scene_bbox = BBox_unpack(packed_circle.scene_bbox);
 
         if (tag == PietItem_Circle) {
             fg.g = 1.0;
@@ -427,10 +423,10 @@ void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
         uint tag = PietItem_tag(per_tile_command_list, item_offset);
 
         if (tag == PietItem_Circle) {
-            BBoxPacked packed_scene_bbox = PietCirclePacked_scene_bbox(per_tile_command_list, item_offset);
-            BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
-            SRGBColorPacked packed_color = PietCirclePacked_color(per_tile_command_list, item_offset);
-            SRGBColor color = SRGBColorPacked_unpack(packed_color);
+            BBoxPacked packed_scene_bbox = PietCircle_scene_bbox(per_tile_command_list, item_offset);
+            BBox scene_bbox = BBox_unpack(packed_scene_bbox);
+            SRGBColorPacked packed_color = PietCircle_color(per_tile_command_list, item_offset);
+            SRGBColor color = SRGBColor_unpack(packed_color);
 
             fg.r = color.r/255.0;
             fg.g = color.g/255.0;
@@ -439,15 +435,15 @@ void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             fg.a = circle_alpha(pixel_pos, scene_bbox, color.a/255.0);
             bg = blend_pd_over(bg, fg);
         } else if (tag == PietItem_Glyph) {
-            BBoxPacked packed_scene_bbox = PietGlyphPacked_scene_bbox(per_tile_command_list, item_offset);
-            BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
+            BBoxPacked packed_scene_bbox = PietGlyph_scene_bbox(per_tile_command_list, item_offset);
+            BBox scene_bbox = BBox_unpack(packed_scene_bbox);
 
             if (is_pixel_in_bbox(pixel_pos, scene_bbox)) {
-                BBoxPacked packed_atlas_bbox = PietGlyphPacked_atlas_bbox(per_tile_command_list, item_offset);
-                BBox atlas_bbox = BBoxPacked_unpack(packed_atlas_bbox);
+                BBoxPacked packed_atlas_bbox = PietGlyph_atlas_bbox(per_tile_command_list, item_offset);
+                BBox atlas_bbox = BBox_unpack(packed_atlas_bbox);
 
-                SRGBColorPacked packed_color = PietGlyphPacked_color(per_tile_command_list, item_offset);
-                SRGBColor color = SRGBColorPacked_unpack(packed_color);
+                SRGBColorPacked packed_color = PietGlyph_color(per_tile_command_list, item_offset);
+                SRGBColor color = SRGBColor_unpack(packed_color);
 
                 fg.r = color.r/255.0;
                 fg.g = color.g/255.0;

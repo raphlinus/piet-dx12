@@ -44,21 +44,18 @@ impl BBox {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::new();
 
-        // reverse order of each 4 bytes, so write component 2 first, in LE, then component 1 in LE
-        bytes
-            .write_u16::<LittleEndian>(self.x1)
-            .expect("could not convert u16 to bytes");
-        // scene_bbox_x0
         bytes
             .write_u16::<LittleEndian>(self.x0)
             .expect("could not convert u16 to bytes");
+        bytes
+            .write_u16::<LittleEndian>(self.x1)
+            .expect("could not convert u16 to bytes");
 
         bytes
-            .write_u16::<LittleEndian>(self.y1)
-            .expect("could not convert u16 to bytes");
-        // scene_bbox_x0
-        bytes
             .write_u16::<LittleEndian>(self.y0)
+            .expect("could not convert u16 to bytes");
+        bytes
+            .write_u16::<LittleEndian>(self.y1)
             .expect("could not convert u16 to bytes");
 
         bytes

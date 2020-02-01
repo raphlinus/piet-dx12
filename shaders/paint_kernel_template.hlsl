@@ -103,9 +103,9 @@ void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
         uint item_offset = cmd_item_start + PIET_ITEM_SIZE*i;
         uint tag = PietItem_tag(per_tile_command_list, item_offset);
 
-        PietCirclePacked packed_circle = PietCirclePacked_read(per_tile_command_list, cmd_item_start);
-        SRGBColor color = SRGBColorPacked_unpack(packed_circle.color);
-        BBox scene_bbox = BBoxPacked_unpack(packed_circle.scene_bbox);
+        PietCirclePacked packed_circle = PietCircle_read(per_tile_command_list, cmd_item_start);
+        SRGBColor color = SRGBColor_unpack(packed_circle.color);
+        BBox scene_bbox = BBox_unpack(packed_circle.scene_bbox);
 
         if (tag == PietItem_Circle) {
             fg.g = 1.0;
@@ -124,10 +124,10 @@ void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
         uint tag = PietItem_tag(per_tile_command_list, item_offset);
 
         if (tag == PietItem_Circle) {
-            BBoxPacked packed_scene_bbox = PietCirclePacked_scene_bbox(per_tile_command_list, item_offset);
-            BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
-            SRGBColorPacked packed_color = PietCirclePacked_color(per_tile_command_list, item_offset);
-            SRGBColor color = SRGBColorPacked_unpack(packed_color);
+            BBoxPacked packed_scene_bbox = PietCircle_scene_bbox(per_tile_command_list, item_offset);
+            BBox scene_bbox = BBox_unpack(packed_scene_bbox);
+            SRGBColorPacked packed_color = PietCircle_color(per_tile_command_list, item_offset);
+            SRGBColor color = SRGBColor_unpack(packed_color);
 
             fg.r = color.r/255.0;
             fg.g = color.g/255.0;
@@ -136,15 +136,15 @@ void paint_items(uint3 Gid: SV_GroupID, uint3 DTid : SV_DispatchThreadID) {
             fg.a = circle_alpha(pixel_pos, scene_bbox, color.a/255.0);
             bg = blend_pd_over(bg, fg);
         } else if (tag == PietItem_Glyph) {
-            BBoxPacked packed_scene_bbox = PietGlyphPacked_scene_bbox(per_tile_command_list, item_offset);
-            BBox scene_bbox = BBoxPacked_unpack(packed_scene_bbox);
+            BBoxPacked packed_scene_bbox = PietGlyph_scene_bbox(per_tile_command_list, item_offset);
+            BBox scene_bbox = BBox_unpack(packed_scene_bbox);
 
             if (is_pixel_in_bbox(pixel_pos, scene_bbox)) {
-                BBoxPacked packed_atlas_bbox = PietGlyphPacked_atlas_bbox(per_tile_command_list, item_offset);
-                BBox atlas_bbox = BBoxPacked_unpack(packed_atlas_bbox);
+                BBoxPacked packed_atlas_bbox = PietGlyph_atlas_bbox(per_tile_command_list, item_offset);
+                BBox atlas_bbox = BBox_unpack(packed_atlas_bbox);
 
-                SRGBColorPacked packed_color = PietGlyphPacked_color(per_tile_command_list, item_offset);
-                SRGBColor color = SRGBColorPacked_unpack(packed_color);
+                SRGBColorPacked packed_color = PietGlyph_color(per_tile_command_list, item_offset);
+                SRGBColor color = SRGBColor_unpack(packed_color);
 
                 fg.r = color.r/255.0;
                 fg.g = color.g/255.0;
