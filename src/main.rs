@@ -14,7 +14,7 @@ pub mod scene;
 pub mod window;
 
 #[macro_use]
-extern crate piet_hlsl_derive;
+extern crate piet_gpu_derive;
 
 extern crate font_rs;
 extern crate kurbo;
@@ -534,7 +534,7 @@ fn populate_render_context(
     }
 }
 
-piet_hlsl! {
+piet_gpu! {
     mod scene {
         struct BBox {
             x_min: u16,
@@ -570,7 +570,7 @@ piet_hlsl! {
 
 fn main() {
     {
-        let gpu_side_code: String = gen_hlsl_scene();
+        let gpu_side_code: String = gen_gpu_scene("HLSL");
         let shader_folder = Path::new("shaders");
         let readers_fp = shader_folder.join(Path::new("readers.hlsl"));
         let mut f = File::create(readers_fp).unwrap();

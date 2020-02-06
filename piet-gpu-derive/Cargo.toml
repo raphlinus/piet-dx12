@@ -1,5 +1,5 @@
 [package]
-name = "piet-hlsl-derive"
+name = "piet-gpu-derive"
 version = "0.0.0"
 authors = ["Raph Levien <raph.levien@gmail.com>", "Brian Merchant <bhmerchant@gmail.com>"]
 description = "Proc macro derives for piet-dx12."

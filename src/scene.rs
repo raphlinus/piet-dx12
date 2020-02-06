@@ -11,7 +11,7 @@ extern crate font_rs;
 extern crate kurbo;
 extern crate rand;
 
-use kurbo::{Circle, Point, Rect, Shape};
+use kurbo::{Circle, Rect};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::convert::TryFrom;
@@ -77,10 +77,6 @@ impl SRGBColor {
             b: color[2],
             a: color[3],
         }
-    }
-
-    fn new(r: u8, g: u8, b: u8, a: u8) -> SRGBColor {
-        SRGBColor { r, g, b, a }
     }
 
     fn to_bytes(&self) -> Vec<u8> {

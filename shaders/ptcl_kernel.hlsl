@@ -290,7 +290,7 @@ inline uint PietItem_tag(ByteAddressBuffer buf, PietItemRef ref) {
     return result;
 }
 
-inline void PietItem_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {
+inline void PietItem_copy(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {
     uint4 group0 = src.Load4(src_ref);
     dst.Store4(dst_ref, group0);
 
@@ -353,7 +353,7 @@ void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
         bool hit = bbox_interiors_intersect(scene_bbox, tile_bbox);
 
         if (hit) {
-            PietItem_read_into(item_data_buffer, item_offset, per_tile_command_list, cmd_list_offset);
+            PietItem_copy(item_data_buffer, item_offset, per_tile_command_list, cmd_list_offset);
             cmd_list_offset += PIET_ITEM_SIZE;
             num_commands += 1;
         }

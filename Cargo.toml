@@ -19,4 +19,4 @@ font-rs = {git = "https://github.com/raphlinus/font-rs.git", branch = "master"}
 piet = "0.0.6"
 #piet = {git = "https://github.com/linebender/piet.git", branch = "master"}
 kurbo = "0.5.1"
-piet-hlsl-derive = { path = "./piet-hlsl-derive" }
+piet-gpu-derive = { path = "piet-gpu-derive" }

@@ -277,14 +277,14 @@ dependencies = [
  "image 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "kurbo 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "piet 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "piet-hlsl-derive 0.0.0",
+ "piet-gpu-derive 0.0.0",
  "rand 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "wio 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
-name = "piet-hlsl-derive"
+name = "piet-gpu-derive"
 version = "0.0.0"
 dependencies = [
  "proc-macro2 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",

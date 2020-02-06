@@ -438,7 +438,7 @@ impl GpuState {
         println!("slop_x: {}", (canvas_width / (width as f32)) - 1.0);
         println!("slop_y: {}", (canvas_height / (height as f32)) - 1.0);
         println!("num_ptcl_tg_x: {}", num_ptcl_tg_x);
-        println!("num_ptcl_tg_x: {}", num_ptcl_tg_y);
+        println!("num_ptcl_tg_y: {}", num_ptcl_tg_y);
         //panic!("stop");
 
         let viewport = d3d12::D3D12_VIEWPORT {
@@ -1169,7 +1169,7 @@ impl GpuState {
             compute_descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset + 1),
             0,
-            per_tile_command_list_buffer_size_in_u32s,
+            per_tile_command_list_buffer_size_in_bytes,
         );
 
         // create scene constants buffer
@@ -1307,7 +1307,6 @@ impl GpuState {
             BaseShaderRegister: uav_register_index,
             ..mem::zeroed()
         };
-        uav_register_index += canvas_descriptor_range.NumDescriptors;
 
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
