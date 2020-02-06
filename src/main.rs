@@ -6,17 +6,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-extern crate font_rs;
-extern crate kurbo;
-extern crate piet;
-extern crate rand;
-
 pub mod atlas;
 pub mod dx12;
 pub mod error;
 pub mod gpu;
 pub mod scene;
 pub mod window;
+
+#[macro_use]
+extern crate piet_hlsl_derive;
+
+extern crate font_rs;
+extern crate kurbo;
+extern crate piet;
+extern crate rand;
 
 use atlas::Atlas;
 use font_rs::font::{parse, Font as RawFont};
@@ -31,9 +34,9 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fs::File;
 use std::hash::Hash;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -314,11 +317,11 @@ impl TextLayoutBuilder for DX12TextLayoutBuilder {
             let glyph_advance = atlas.glyph_advances[gix] as i32;
 
             match atlas.glyph_bboxes[gix] {
-                Some(in_atlas_bbox) => {
+                Some(atlas_bbox) => {
                     let (w, h) = {
                         (
-                            (in_atlas_bbox.1 - in_atlas_bbox.0) as i32,
-                            (in_atlas_bbox.3 - in_atlas_bbox.2) as i32,
+                            (atlas_bbox.1 - atlas_bbox.0) as i32,
+                            (atlas_bbox.3 - atlas_bbox.2) as i32,
                         )
                     };
 
@@ -331,16 +334,15 @@ impl TextLayoutBuilder for DX12TextLayoutBuilder {
                         y1: (y_offset + h) as f64,
                     };
 
-                    let in_atlas_bbox = Rect {
-                        x0: in_atlas_bbox.0 as f64,
-                        x1: in_atlas_bbox.1 as f64,
-                        y0: in_atlas_bbox.2 as f64,
-                        y1: in_atlas_bbox.3 as f64,
+                    let atlas_bbox = Rect {
+                        x0: atlas_bbox.0 as f64,
+                        x1: atlas_bbox.1 as f64,
+                        y0: atlas_bbox.2 as f64,
+                        y1: atlas_bbox.3 as f64,
                     };
 
                     placed_glyphs.push(scene::PlacedGlyph {
-                        atlas_glyph_index: gix as u32,
-                        in_atlas_bbox,
+                        atlas_bbox,
                         placed_bbox,
                     });
 
@@ -393,19 +395,17 @@ pub fn win32_string(value: &str) -> Vec<u16> {
 }
 
 #[allow(dead_code)]
-fn generate_test_circle() -> Vec<(kurbo::Circle, DX12Brush)> {
+fn generate_circle_test() -> Vec<(kurbo::Circle, DX12Brush)> {
     let mut circles = Vec::<(kurbo::Circle, DX12Brush)>::new();
-
-    for _ in 0..1 {
+    for i in 0..2 {
         let circle = kurbo::Circle {
-            center: kurbo::Point {
-                x: 100.0,
-                y: 100.0,
-            },
+            center: kurbo::Point { x: 100.0 + 50.0*(i as f64), y: 100.0},
             radius: 50.0,
         };
+        // println!("{}, {}", circle.center.x, circle.center.y);
 
-        let color_u8s: [u8; 4] = [255; 4];
+        let color_u8s: [u8; 4] = [255, 255, 255, (255.0*0.5_f64.powi(i)) as u8];
+        // println!("{:?}", color_u8s);
         let brush = DX12Brush::Solid(ColorValue {
             color_u32: 0,
             color_u8s,
@@ -415,7 +415,7 @@ fn generate_test_circle() -> Vec<(kurbo::Circle, DX12Brush)> {
     }
 
     circles
-} 
+}
 
 #[allow(dead_code)]
 fn generate_random_circles(num_circles: u32, screen_size: Rect) -> Vec<(kurbo::Circle, DX12Brush)> {
@@ -487,15 +487,16 @@ fn generate_random_text(
     random_text
 }
 
+
 #[allow(dead_code)]
 fn generate_test_text() -> Vec<(String, kurbo::Point, u32, DX12Brush)> {
     let mut text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
 
-    let test_string = String::from(" ");
+    let test_string = String::from("32");
 
     let font_size = 50;
 
-    let pos = kurbo::Point { x: 400.0, y: 400.0 };
+    let pos = kurbo::Point { x: 100.0, y: 100.0 };
 
     let mut color_u8s: [u8; 4] = [0; 4];
     for i in 0..4 {
@@ -533,7 +534,50 @@ fn populate_render_context(
     }
 }
 
+piet_hlsl! {
+    mod scene {
+        struct BBox {
+            x_min: u16,
+            x_max: u16,
+            y_min: u16,
+            y_max: u16,
+        }
+
+        struct SRGBColor {
+            r: u8,
+            g: u8,
+            b: u8,
+            a: u8,
+        }
+
+        struct PietGlyph {
+            scene_bbox: BBox,
+            atlas_bbox: BBox,
+            color: SRGBColor,
+        }
+
+        struct PietCircle {
+            scene_bbox: BBox,
+            color: SRGBColor,
+        }
+
+        enum PietItem {
+            Circle(PietCircle),
+            Glyph(PietGlyph),
+        }
+    }
+}
+
 fn main() {
+    {
+        let gpu_side_code: String = gen_hlsl_scene();
+        let shader_folder = Path::new("shaders");
+        let readers_fp = shader_folder.join(Path::new("readers.hlsl"));
+        let mut f = File::create(readers_fp).unwrap();
+        f.write_all(gpu_side_code.as_bytes()).unwrap();
+        f.sync_all().unwrap();
+    }
+
     unsafe {
         println!("creating window...");
         let wnd = window::Window::new(win32_string("test"), win32_string("test"));
@@ -552,15 +596,15 @@ fn main() {
         let atlas_height: u16 = 512;
         let tile_side_length_in_pixels: u32 = 16;
         // longest possible text string is "very piet", which contains 8 non-whitespace glyphs
-        let max_objects_in_scene: u32 = num_circles + num_strings * 8;
+        let max_items_scene: u32 = num_circles + num_strings * 8;
 
         let mut gpu_state = gpu::GpuState::new(
             &wnd,
             String::from("build_per_tile_command_list"),
-            String::from("paint_objects"),
+            String::from("paint_items"),
             String::from("VSMain"),
             String::from("PSMain"),
-            max_objects_in_scene,
+            max_items_scene,
             tile_side_length_in_pixels,
             32,
             1,
@@ -577,6 +621,7 @@ fn main() {
         //let scene_circles= Vec::<(kurbo::Circle, DX12Brush)>::new();
         //let scene_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
         //let scene_text = generate_test_text();
+        //let scene_circles = generate_circle_test();
         let raw_font_generator = Arc::new(RawFontGenerator::load_notomono());
 
         for i in 0..num_renders {
@@ -588,13 +633,15 @@ fn main() {
                 &scene_text,
             );
 
-            let num_objects_in_scene = u32::try_from(render_context.scene.objects.len())
-                .expect("cannot store number of objects in scene as u32");
-            let object_data = render_context.scene.to_bytes();
+            let num_items = u32::try_from(render_context.scene.items.len())
+                .expect("cannot store number of items in scene as u32");
+            let (item_bboxes, items) = render_context.scene.to_bytes();
+            //panic!("{:?}, {:?}", item_bboxes, items);
 
             gpu_state.upload_data(
-                Some(num_objects_in_scene),
-                Some(object_data),
+                Some(num_items),
+                Some(item_bboxes),
+                Some(items),
                 Some(
                     &render_context
                         .atlas

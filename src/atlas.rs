@@ -132,7 +132,7 @@ impl Atlas {
         self.char_to_ix_map.insert((c, font_size), self.glyph_count);
         self.glyph_count += 1;
 
-        let in_atlas_bbox = match &glyph_bitmap {
+        let atlas_bbox = match &glyph_bitmap {
             Some(gb) => {
                 let gw = u16::try_from(gb.width)
                     .expect("could not safely convert glyph bitmap width to u16");
@@ -151,10 +151,10 @@ impl Atlas {
 
                 let glyph_row_stride = gb.width * std::mem::size_of::<u8>();
 
-                let x_offset_in_atlas = (gbbox.0 as usize) * std::mem::size_of::<u8>();
+                let x_offset_atlas = (gbbox.0 as usize) * std::mem::size_of::<u8>();
                 for hix in 0..gb.height {
                     let start_address =
-                        x_offset_in_atlas + (hix + (gbbox.2 as usize)) * self.row_stride;
+                        x_offset_atlas + (hix + (gbbox.2 as usize)) * self.row_stride;
                     for ro in 0..glyph_row_stride {
                         self.bytes[start_address + ro] = gb.data[hix * glyph_row_stride + ro];
                     }
@@ -164,7 +164,7 @@ impl Atlas {
             }
             None => None,
         };
-        self.glyph_bboxes.push(in_atlas_bbox);
+        self.glyph_bboxes.push(atlas_bbox);
 
         self.glyph_advances.push(glyph_advance);
 

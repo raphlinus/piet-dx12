@@ -1,5 +1,5 @@
 // Copyright © 2019 piet-dx12 developers.
-//
+
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
@@ -7,113 +7,60 @@
 // except according to those terms.
 
 // a structure of arrays
-// fields: in_scene_bbox_per_object, general_data_per_object, in_atlas_bbox_per_object, color_data_per_object
-// suppose in_scene_bbox_per_object starts at address a_0
-// then general_data_per_object starts at address a_1 = a_0 + bbox_size*num_objects_in_scene
-// in_atlas_bbox_per_object starts at a_2 = a_1 + general_data_size*num_objects_in_scene
+// fields: scene_bbox_per_item, general_data_per_item, atlas_bbox_per_item, color_data_per_item
+// suppose scene_bbox_per_item starts at address a_0
+// then general_data_per_item starts at address a_1 = a_0 + bbox_size*num_items
+// atlas_bbox_per_item starts at a_2 = a_1 + general_data_size*num_items
 // ... and so on
-ByteAddressBuffer object_data_buffer : register(t0);
+ByteAddressBuffer item_scene_bboxes: register(t0);
+ByteAddressBuffer item_data_buffer : register(t1);
 
 RWByteAddressBuffer per_tile_command_list: register(u0);
 
 cbuffer SceneConstants: register(b0) {
-    uint num_objects_in_scene;
+    uint num_items;
 };
 
 cbuffer GpuStateConstants : register(b1)
 {
-    uint max_objects_in_scene;
-    uint tile_side_length_in_pixels;
+    uint max_items;
+    uint tile_side_length;
     uint num_tiles_x;
     uint num_tiles_y;
 };
 
-cbuffer DataSpecificationConstants : register(b2)
-{
-    uint object_size;
-    uint init_in_scene_bbox_address;
-    uint init_general_data_address;
-    uint init_in_atlas_bbox_address;
-    uint init_color_data_address;
-    uint bbox_data_size;
-    uint general_data_size;
-    uint color_data_size;
-}
+~READERS~
 
-#include "shaders/object_loaders.hlsl"
-#include "shaders/unpack.hlsl"
+~UTILS~
 
-bool do_bbox_interiors_intersect(uint4 bbox0, uint4 bbox1) {
-    uint right1 = bbox1[1];
-    uint left0 = bbox0[0];
-    uint left1 = bbox1[0];
-    uint right0 = bbox0[1];
-
-    bool result = 1;
-
-    if (right1 <= left0 || left1 >= right0) {
-        result = 0;
-    }
-
-    uint bot1 = bbox1[3];
-    uint top0 = bbox0[2];
-    uint top1 = bbox1[2];
-    uint bot0 = bbox0[3];
-
-    if (result && (bot1 <= top0 || top1 >= bot0)) {
-        result = 0;
-    }
-
-    return result;
-}
-
-uint4 generate_tile_bbox(uint2 tile_coord) {
-    uint tile_x_ix = tile_coord.x;
-    uint tile_y_ix = tile_coord.y;
-
-    uint left = tile_side_length_in_pixels*tile_x_ix;
-    uint top = tile_side_length_in_pixels*tile_y_ix;
-    uint right = left + tile_side_length_in_pixels;
-    uint bot = top + tile_side_length_in_pixels;
-
-    uint4 result = {left, right, top, bot};
-    return result;
-}
+#define NUM_CMD_OFFSET 4
 
 [numthreads(~PTCL_X~, ~PTCL_Y~, 1)]
 void build_per_tile_command_list(uint3 DTid : SV_DispatchThreadID) {
-    uint linear_tile_ix = num_tiles_x*DTid.y + DTid.x;
+    uint tile_ix = num_tiles_x*DTid.y + DTid.x;
 
-    uint size_of_command_list = 4 + num_objects_in_scene*object_size;
+    uint size_of_command_list = NUM_CMD_OFFSET + num_items*PIET_ITEM_SIZE;
+    uint cmd_list_init = size_of_command_list*tile_ix;
+    uint cmd_list_offset = cmd_list_init + NUM_CMD_OFFSET;
+    uint item_offset = 0;
+    uint item_bbox_offset = 0;
 
-    uint command_list_init_address = size_of_command_list*linear_tile_ix;
+    uint num_commands = 0;
+    BBox tile_bbox = generate_tile_bbox(DTid.xy);
 
-    uint cmd_general_data_start = command_list_init_address + 4;
-    uint cmd_in_scene_bbox_start = cmd_general_data_start + num_objects_in_scene*general_data_size;
-    uint cmd_in_atlas_bbox_start = cmd_in_scene_bbox_start + num_objects_in_scene*bbox_data_size;
-    uint cmd_color_start = cmd_in_atlas_bbox_start + num_objects_in_scene*bbox_data_size;
-
-    uint num_stored_commands = 0;
-    uint4 tile_bbox = generate_tile_bbox(DTid.xy);
-
-    for (uint i = 0; i < num_objects_in_scene; i++) {
-        uint2 packed_in_scene_bbox = load_packed_in_scene_bbox_at_object_index(i);
-        uint4 in_scene_bbox = unpack_bbox(packed_in_scene_bbox);
-        bool hit = do_bbox_interiors_intersect(in_scene_bbox, tile_bbox);
+    for (uint i = 0; i < num_items; i++) {
+        BBoxPacked packed_scene_bbox = BBox_read(item_scene_bboxes, item_bbox_offset);
+        BBox scene_bbox = BBox_unpack(packed_scene_bbox);
+        bool hit = bbox_interiors_intersect(scene_bbox, tile_bbox);
 
         if (hit) {
-            uint packed_general_data = load_packed_general_data_at_object_index(i);
-            uint2 packed_in_atlas_bbox = load_packed_in_atlas_bbox_at_object_index(i);
-            uint packed_color = load_packed_color_at_object_index(i);
-
-            per_tile_command_list.Store(cmd_general_data_start + num_stored_commands*general_data_size, packed_general_data);
-            per_tile_command_list.Store2(cmd_in_scene_bbox_start + num_stored_commands*bbox_data_size, packed_in_scene_bbox);
-            per_tile_command_list.Store2(cmd_in_atlas_bbox_start + num_stored_commands*bbox_data_size, packed_in_atlas_bbox);
-            per_tile_command_list.Store(cmd_color_start + num_stored_commands*color_data_size, packed_color);
-            num_stored_commands += 1;
+            PietItem_read_into(item_data_buffer, item_offset, per_tile_command_list, cmd_list_offset);
+            cmd_list_offset += PIET_ITEM_SIZE;
+            num_commands += 1;
         }
+
+        item_offset += PIET_ITEM_SIZE;
+        item_bbox_offset += BBOX_SIZE;
     }
-
-    per_tile_command_list.Store(command_list_init_address, num_stored_commands);
+    per_tile_command_list.Store(cmd_list_init, num_commands);
 }
-

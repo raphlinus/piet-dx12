@@ -11,7 +11,7 @@ extern crate winapi;
 
 use crate::dx12;
 use crate::error;
-use crate::scene::GenericObject;
+use crate::scene::PietItem;
 use crate::window;
 use kurbo::Rect;
 use std::convert::TryFrom;
@@ -48,31 +48,44 @@ const CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 fn materialize_per_tile_command_list_kernel_code(
     ptcl_num_tiles_per_tg_x: u32,
     ptcl_num_tiles_per_tg_y: u32,
+    readers_path: &Path,
+    utils_path: &Path,
     shader_template_path: &Path,
     shader_path: &Path,
 ) {
+    let readers = std::fs::read_to_string(readers_path).expect("could not read data from provided readers.hlsl path");
+    let utils = std::fs::read_to_string(utils_path).expect("could not read data from provided utils.hlsl");
+    
     let step0 = std::fs::read_to_string(shader_template_path)
         .expect("could not read data from provided shader template path");
 
     let step1 = step0.replace("~PTCL_X~", &format!("{}", ptcl_num_tiles_per_tg_x));
     let step2 = step1.replace("~PTCL_Y~", &format!("{}", ptcl_num_tiles_per_tg_y));
-
-    std::fs::write(shader_path, step2).expect("shader template could not be materialized");
+    let step3 = step2.replace("~READERS~", &readers);
+    let step4 = step3.replace("~UTILS~", &utils);
+    
+    std::fs::write(shader_path, step4).expect("could not write to provided shader path");
 }
 
 fn materialize_paint_kernel_code(
     paint_num_pixels_per_tg_x: u32,
     paint_num_pixels_per_tg_y: u32,
+    reader_path: &Path,
+    utils_path: &Path,
     shader_template_path: &Path,
     shader_path: &Path,
 ) {
-    let step0 = std::fs::read_to_string(shader_template_path)
-        .expect("could not read data from provided shader template path");
+    let reader = std::fs::read_to_string(reader_path).expect("could not read data from provided readers.hlsl path");
+    let utils = std::fs::read_to_string(utils_path).expect("could not read data from provided utils.hlsl");
 
+    let step0 = std::fs::read_to_string(shader_template_path)
+        .expect("could not write to provided shader path");
     let step1 = step0.replace("~P_X~", &format!("{}", paint_num_pixels_per_tg_x));
     let step2 = step1.replace("~P_Y~", &format!("{}", paint_num_pixels_per_tg_y));
-
-    std::fs::write(shader_path, step2).expect("shader template could not be materialized");
+    let step3 = step2.replace("~READERS~", &reader);
+    let step4 = step3.replace("~UTILS~", &utils);
+    
+    std::fs::write(shader_path, step4).expect("shader template could not be materialized");
 }
 
 enum TimingQueryPoints {
@@ -209,19 +222,19 @@ fn average_f64s(input_data: &[f64]) -> f64 {
 }
 
 pub enum Descriptors {
-    ObjectDataSRV,
+    ObjectBBoxesSRV,
+    ObjectsSRV,
     PtclsUAV,
     PtclsSRV,
     SceneConstantsCBV,
     GpuStateConstantsCBV,
-    DataSpecificationConstantsCBV,
     GlyphAtlasSRV,
     CanvasUAV,
 }
 
 // should match constants buffer as described in shaders
 pub struct SceneConstants {
-    pub num_objects_in_scene: u32,
+    pub num_items_scene: u32,
 }
 
 impl SceneConstants {
@@ -230,13 +243,13 @@ impl SceneConstants {
     }
 
     pub fn as_array(&self) -> [u32; 1] {
-        [self.num_objects_in_scene]
+        [self.num_items_scene]
     }
 }
 
 // should match gpu state constants buffer as described in shaders
 pub struct GpuStateConstants {
-    pub max_objects_in_scene: u32,
+    pub max_items_scene: u32,
     pub tile_side_length_in_pixels: u32,
     pub num_tiles_x: u32,
     pub num_tiles_y: u32,
@@ -249,64 +262,10 @@ impl GpuStateConstants {
 
     pub fn as_array(&self) -> [u32; 4] {
         [
-            self.max_objects_in_scene,
+            self.max_items_scene,
             self.tile_side_length_in_pixels,
             self.num_tiles_x,
             self.num_tiles_y,
-        ]
-    }
-}
-
-pub struct DataSpecificationConstants {
-    pub object_size: u32,
-    pub init_in_scene_bbox_address: u32,
-    pub init_general_data_address: u32,
-    pub init_in_atlas_bbox_address: u32,
-    pub init_color_data_address: u32,
-    pub bbox_data_size: u32,
-    pub general_data_size: u32,
-    pub color_data_size: u32,
-}
-
-impl DataSpecificationConstants {
-    pub fn new(num_objects_in_scene: u32) -> DataSpecificationConstants {
-        let init_general_data_address: u32 = 0;
-        let general_data_size: u32 = 4;
-        let init_in_scene_bbox_address: u32 =
-            init_general_data_address + num_objects_in_scene * general_data_size;
-        let bbox_data_size: u32 = 8;
-        let init_in_atlas_bbox_address: u32 =
-            init_in_scene_bbox_address + num_objects_in_scene * bbox_data_size;
-        let init_color_data_address: u32 =
-            init_in_atlas_bbox_address + num_objects_in_scene * bbox_data_size;
-        let color_data_size = 4;
-
-        DataSpecificationConstants {
-            object_size: GenericObject::size_in_bytes() as u32,
-            init_in_scene_bbox_address,
-            init_general_data_address,
-            init_in_atlas_bbox_address,
-            init_color_data_address,
-            bbox_data_size,
-            general_data_size,
-            color_data_size,
-        }
-    }
-
-    pub fn num_constants() -> u8 {
-        8
-    }
-
-    pub fn as_array(&self) -> [u32; 8] {
-        [
-            self.object_size,
-            self.init_in_scene_bbox_address,
-            self.init_general_data_address,
-            self.init_in_atlas_bbox_address,
-            self.init_color_data_address,
-            self.bbox_data_size,
-            self.general_data_size,
-            self.color_data_size,
         ]
     }
 }
@@ -336,8 +295,8 @@ pub struct GpuState {
     compute_descriptor_heap: dx12::DescriptorHeap,
     scene_constants_buffer: dx12::Resource,
     _gpu_state_constants_buffer: dx12::Resource,
-    data_specification_constants_buffer: dx12::Resource,
-    object_data_buffer: dx12::Resource,
+    item_bboxes_buffer: dx12::Resource,
+    items_buffer: dx12::Resource,
     per_tile_command_lists_buffer: dx12::Resource,
     intermediate_atlas_texture_upload_buffer: dx12::Resource,
     atlas_texture_data_uploaded: bool,
@@ -360,7 +319,6 @@ pub struct GpuState {
 
     scene_constants: SceneConstants,
     _gpu_state_constants: GpuStateConstants,
-    data_specification_constants: DataSpecificationConstants,
 }
 
 impl GpuState {
@@ -370,7 +328,7 @@ impl GpuState {
         paint_entry: String,
         vertex_entry: String,
         fragment_entry: String,
-        max_objects_in_scene: u32,
+        max_items_scene: u32,
         tile_side_length_in_pixels: u32,
         per_tile_command_lists_num_tiles_per_tg_x: u32,
         per_tile_command_lists_num_tiles_per_tg_y: u32,
@@ -433,12 +391,16 @@ impl GpuState {
         };
 
         let shader_folder = Path::new("shaders");
+        let readers_path = shader_folder.join(Path::new("readers.hlsl"));
+        let utils_path = shader_folder.join(Path::new("utils.hlsl"));
 
         let ptcl_kernel_template_path = shader_folder.join(Path::new("ptcl_kernel_template.hlsl"));
         let ptcl_kernel_path = shader_folder.join(Path::new("ptcl_kernel.hlsl"));
         materialize_per_tile_command_list_kernel_code(
             per_tile_command_lists_num_tiles_per_tg_x,
             per_tile_command_lists_num_tiles_per_tg_y,
+            &readers_path,
+            &utils_path,
             &ptcl_kernel_template_path,
             &ptcl_kernel_path,
         );
@@ -449,6 +411,8 @@ impl GpuState {
         materialize_paint_kernel_code(
             paint_num_pixels_per_tg_x,
             paint_num_pixels_per_tg_y,
+            &readers_path,
+            &utils_path,
             &paint_kernel_template_path,
             &paint_kernel_path,
         );
@@ -509,20 +473,22 @@ impl GpuState {
                 command_queue.clone(),
             );
 
-        let per_tile_command_lists_buffer_size_in_u32s =
-            (GenericObject::size_in_u32s() * max_objects_in_scene + 1) * num_tiles_x * num_tiles_y;
-        let object_data_buffer_size_in_u32s = max_objects_in_scene * GenericObject::size_in_u32s();
+        let per_tile_command_lists_buffer_size_in_bytes = (PietItem::size_in_bytes() as u32)
+            * (max_items_scene + 1)
+            * num_tiles_x
+            * num_tiles_y;
+        let item_bboxes_buffer_size_in_bytes = max_items_scene * 64;
+        let items_buffer_size_in_bytes = max_items_scene * (PietItem::size_in_bytes() as u32);
 
         let num_scene_constants = SceneConstants::num_constants();
         let num_gpu_state_constants = GpuStateConstants::num_constants();
-        let num_data_specification_constants = DataSpecificationConstants::num_constants();
 
         let (
             compute_descriptor_heap,
             scene_constants_buffer,
             gpu_state_constants_buffer,
-            data_specification_constants_buffer,
-            object_data_buffer,
+            item_bboxes_buffer,
+            items_buffer,
             per_tile_command_lists_buffer,
             intermediate_texture_upload_buffer,
             atlas_texture,
@@ -533,9 +499,9 @@ impl GpuState {
             device.clone(),
             num_scene_constants,
             num_gpu_state_constants,
-            num_data_specification_constants,
-            object_data_buffer_size_in_u32s,
-            per_tile_command_lists_buffer_size_in_u32s,
+            item_bboxes_buffer_size_in_bytes,
+            items_buffer_size_in_bytes,
+            per_tile_command_lists_buffer_size_in_bytes,
             atlas_width,
             atlas_height,
             atlas_size_in_bytes,
@@ -544,7 +510,7 @@ impl GpuState {
         );
 
         let gpu_state_constants = GpuStateConstants {
-            max_objects_in_scene,
+            max_items_scene,
             tile_side_length_in_pixels,
             num_tiles_x,
             num_tiles_y,
@@ -609,8 +575,8 @@ impl GpuState {
             compute_descriptor_heap,
             scene_constants_buffer,
             _gpu_state_constants_buffer: gpu_state_constants_buffer,
-            data_specification_constants_buffer: data_specification_constants_buffer,
-            object_data_buffer,
+            item_bboxes_buffer,
+            items_buffer,
             per_tile_command_lists_buffer,
             intermediate_atlas_texture_upload_buffer: intermediate_texture_upload_buffer,
             atlas_texture_data_uploaded: true,
@@ -632,11 +598,10 @@ impl GpuState {
             num_renders,
 
             scene_constants: SceneConstants {
-                num_objects_in_scene: 0,
+                num_items_scene: 0,
             },
 
             _gpu_state_constants: gpu_state_constants,
-            data_specification_constants: DataSpecificationConstants::new(0),
         };
 
         // wait for upload of any resources to gpu
@@ -875,7 +840,10 @@ impl GpuState {
             Ok(()) => {}
             Err(hresult_as_hex) => {
                 match hresult_as_hex.as_str() {
-                    "887a0005" => panic!("presentation failed due to device removal with reason: {}", error::get_human_readable_error(&self.device.get_removal_reason())),
+                    "887a0005" => panic!(
+                        "presentation failed due to device removal with reason: {}",
+                        error::get_human_readable_error(&self.device.get_removal_reason())
+                    ),
                     _ => panic!(
                         "could not present to swapchain: {}",
                         error::get_human_readable_error(hresult_as_hex.as_str())
@@ -1120,9 +1088,9 @@ impl GpuState {
         device: dx12::Device,
         num_scene_constants: u8,
         num_gpu_state_constants: u8,
-        num_data_specification_constants: u8,
-        object_data_buffer_size_in_u32s: u32,
-        per_tile_command_list_buffer_size_in_u32s: u32,
+        item_bboxes_buffer_size_in_bytes: u32,
+        items_buffer_size_in_bytes: u32,
+        per_tile_command_list_buffer_size_in_bytes: u32,
         atlas_width: u64,
         atlas_height: u32,
         atlas_size_in_bytes: u64,
@@ -1150,23 +1118,36 @@ impl GpuState {
         };
         let compute_descriptor_heap = device.create_descriptor_heap(&compute_descriptor_heap_desc);
 
-        // create object data buffer
-        let object_data_buffer = device.create_uploadable_byte_addressed_buffer(
-            Descriptors::ObjectDataSRV as u32,
-            object_data_buffer_size_in_u32s,
+        // create item bboxes buffer
+        let item_bboxes_buffer = device.create_uploadable_byte_addressed_buffer(
+            Descriptors::ObjectBBoxesSRV as u32,
+            item_bboxes_buffer_size_in_bytes,
         );
         device.create_byte_addressed_buffer_shader_resource_view(
-            object_data_buffer.clone(),
+            item_bboxes_buffer.clone(),
             compute_descriptor_heap
-                .get_cpu_descriptor_handle_at_offset(object_data_buffer.descriptor_heap_offset),
+                .get_cpu_descriptor_handle_at_offset(item_bboxes_buffer.descriptor_heap_offset),
             0,
-            object_data_buffer_size_in_u32s,
+            item_bboxes_buffer_size_in_bytes,
+        );
+
+        // create items buffer
+        let items_buffer = device.create_uploadable_byte_addressed_buffer(
+            Descriptors::ObjectsSRV as u32,
+            items_buffer_size_in_bytes,
+        );
+        device.create_byte_addressed_buffer_shader_resource_view(
+            items_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(items_buffer.descriptor_heap_offset),
+            0,
+            items_buffer_size_in_bytes,
         );
 
         // create per tile command list resource
         let ptcl_buffer = device.create_gpu_only_byte_addressed_buffer(
             Descriptors::PtclsUAV as u32,
-            per_tile_command_list_buffer_size_in_u32s,
+            per_tile_command_list_buffer_size_in_bytes,
         );
         //TODO: if per_tile_command_list_buffer_size > std::u32::MAX, then we need to have more views, with first element being std::u32::MAX?
         device.create_byte_addressed_buffer_unordered_access_view(
@@ -1174,7 +1155,14 @@ impl GpuState {
             compute_descriptor_heap
                 .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset),
             0,
-            per_tile_command_list_buffer_size_in_u32s,
+            per_tile_command_list_buffer_size_in_bytes,
+        );
+        device.create_byte_addressed_buffer_shader_resource_view(
+            ptcl_buffer.clone(),
+            compute_descriptor_heap
+                .get_cpu_descriptor_handle_at_offset(ptcl_buffer.descriptor_heap_offset + 1),
+            0,
+            per_tile_command_list_buffer_size_in_bytes,
         );
         device.create_byte_addressed_buffer_shader_resource_view(
             ptcl_buffer.clone(),
@@ -1219,24 +1207,6 @@ impl GpuState {
             padded_size_in_bytes,
         );
 
-        // create gpu state constants buffer
-        if num_data_specification_constants > 8 {
-            panic!("not designed to handle more than 8 gpu state constants");
-        }
-        let padded_size_in_bytes: u32 = 256;
-        let data_specification_constants_buffer = device.create_uploadable_buffer(
-            Descriptors::DataSpecificationConstantsCBV as u32,
-            padded_size_in_bytes as u64,
-        );
-        // https://github.com/microsoft/DirectX-Graphics-Samples/blob/cce992eb853e7cfd6235a10d23d58a8f2334aad5/Samples/Desktop/D3D12HelloWorld/src/HelloConstBuffers/D3D12HelloConstBuffers.cpp#L284
-        device.create_constant_buffer_view(
-            data_specification_constants_buffer.clone(),
-            compute_descriptor_heap.get_cpu_descriptor_handle_at_offset(
-                data_specification_constants_buffer.descriptor_heap_offset,
-            ),
-            padded_size_in_bytes,
-        );
-
         // create atlas texture
         let atlas_format = dxgiformat::DXGI_FORMAT_R8_UNORM;
         let atlas_texture = device.create_gpu_only_texture2d_buffer(
@@ -1269,30 +1239,38 @@ impl GpuState {
         );
 
         // create intermediate atlas texture upload buffer
-        let intermediate_texture_upload_buffer =
-            device.create_uploadable_buffer((Descriptors::CanvasUAV as u32) + 1, atlas_size_in_bytes);
+        let intermediate_texture_upload_buffer = device
+            .create_uploadable_buffer((Descriptors::CanvasUAV as u32) + 1, atlas_size_in_bytes);
         // this does not need to be shader visible, so we don't need a descriptor range for it
         // important to put it at the end of the descriptor heap, so that descriptor heap offsets
         // and descriptor table offsets match
-
-        let mut cbv_register_index: u32 = 0;
+        let cbv_register_index: u32 = 0;
         let mut srv_register_index: u32 = 0;
         let mut uav_register_index: u32 = 0;
 
-        let objects_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+        let item_bboxes_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
-            OffsetInDescriptorsFromTableStart: Descriptors::ObjectDataSRV as u32,
-            BaseShaderRegister: srv_register_index.clone(),
+            OffsetInDescriptorsFromTableStart: Descriptors::ObjectBBoxesSRV as u32,
+            BaseShaderRegister: srv_register_index,
             ..mem::zeroed()
         };
-        srv_register_index += objects_descriptor_range.NumDescriptors;
+        srv_register_index += item_bboxes_descriptor_range.NumDescriptors;
+
+        let items_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
+            RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            NumDescriptors: 1,
+            OffsetInDescriptorsFromTableStart: Descriptors::ObjectsSRV as u32,
+            BaseShaderRegister: srv_register_index,
+            ..mem::zeroed()
+        };
+        srv_register_index += items_descriptor_range.NumDescriptors;
 
         let ptcls_uav_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::PtclsUAV as u32,
-            BaseShaderRegister: uav_register_index.clone(),
+            BaseShaderRegister: uav_register_index,
             ..mem::zeroed()
         };
         uav_register_index += ptcls_uav_descriptor_range.NumDescriptors;
@@ -1301,7 +1279,7 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::PtclsSRV as u32,
-            BaseShaderRegister: srv_register_index.clone(),
+            BaseShaderRegister: srv_register_index,
             ..mem::zeroed()
         };
         srv_register_index += ptcls_srv_descriptor_range.NumDescriptors;
@@ -1310,32 +1288,31 @@ impl GpuState {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
             NumDescriptors: 3,
             OffsetInDescriptorsFromTableStart: Descriptors::SceneConstantsCBV as u32,
-            BaseShaderRegister: cbv_register_index.clone(),
+            BaseShaderRegister: cbv_register_index,
             ..mem::zeroed()
         };
-        cbv_register_index += constants_descriptor_range.NumDescriptors;
 
         let glyph_atlas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::GlyphAtlasSRV as u32,
-            BaseShaderRegister: srv_register_index.clone(),
+            BaseShaderRegister: srv_register_index,
             ..mem::zeroed()
         };
-        srv_register_index += glyph_atlas_descriptor_range.NumDescriptors;
 
         let canvas_descriptor_range = d3d12::D3D12_DESCRIPTOR_RANGE {
             RangeType: d3d12::D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
             NumDescriptors: 1,
             OffsetInDescriptorsFromTableStart: Descriptors::CanvasUAV as u32,
-            BaseShaderRegister: uav_register_index.clone(),
+            BaseShaderRegister: uav_register_index,
             ..mem::zeroed()
         };
         uav_register_index += canvas_descriptor_range.NumDescriptors;
 
         let ptcl_pipeline_root_signature = {
             let per_tile_command_lists_descriptor_ranges = [
-                objects_descriptor_range,
+                item_bboxes_descriptor_range,
+                items_descriptor_range,
                 ptcls_uav_descriptor_range,
                 constants_descriptor_range,
             ];
@@ -1364,8 +1341,8 @@ impl GpuState {
             compute_descriptor_heap,
             scene_constants_buffer,
             gpu_state_constants_buffer,
-            data_specification_constants_buffer,
-            object_data_buffer,
+            item_bboxes_buffer,
+            items_buffer,
             ptcl_buffer,
             intermediate_texture_upload_buffer,
             atlas_texture,
@@ -1377,35 +1354,35 @@ impl GpuState {
 
     pub unsafe fn upload_data(
         &mut self,
-        num_objects_in_scene: Option<u32>,
-        object_data: Option<Vec<u8>>,
+        num_items_scene: Option<u32>,
+        item_bboxes: Option<Vec<u8>>,
+        items: Option<Vec<u8>>,
         atlas_bytes: Option<&[u8]>,
     ) {
-        match num_objects_in_scene {
+        match num_items_scene {
             Some(n) => {
-                self.scene_constants.num_objects_in_scene = n;
+                self.scene_constants.num_items_scene = n;
                 let scene_constants_array = self.scene_constants.as_array();
-
-                self.data_specification_constants = DataSpecificationConstants::new(n);
-                let data_specification_constants_array = self.data_specification_constants.as_array();
 
                 self.scene_constants_buffer.upload_data_to_resource(
                     scene_constants_array.len(),
                     scene_constants_array.as_ptr(),
                 );
-
-                self.data_specification_constants_buffer
-                    .upload_data_to_resource(
-                        data_specification_constants_array.len(),
-                        data_specification_constants_array.as_ptr(),
-                    );
             }
             None => {}
         }
 
-        match object_data {
+        match item_bboxes {
             Some(bytes) => {
-                self.object_data_buffer
+                self.item_bboxes_buffer
+                    .upload_data_to_resource(bytes.len(), bytes.as_ptr());
+            }
+            None => {}
+        }
+
+        match items {
+            Some(bytes) => {
+                self.items_buffer
                     .upload_data_to_resource(bytes.len(), bytes.as_ptr());
             }
             None => {}
