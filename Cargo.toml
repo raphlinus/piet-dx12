@@ -20,3 +20,4 @@ piet = "0.0.6"
 #piet = {git = "https://github.com/linebender/piet.git", branch = "master"}
 kurbo = "0.5.1"
 piet-gpu-derive = { path = "piet-gpu-derive" }
+piet-gpu-types = { path = "piet-gpu-types" }

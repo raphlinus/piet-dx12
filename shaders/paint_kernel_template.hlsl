@@ -35,10 +35,10 @@ bool is_pixel_in_bbox(uint2 pixel_pos, BBox bbox) {
     // warning X4000: use of potentially uninitialized variable
     bool result = 0;
 
-    uint left = bbox.x_min;
-    uint right = bbox.x_max;
-    uint top = bbox.y_min;
-    uint bot = bbox.y_max;
+    uint left = bbox.x0;
+    uint right = bbox.x1;
+    uint top = bbox.y0;
+    uint bot = bbox.y1;
 
     if (left <= px && px <= right) {
         if (top <= py && py <= bot) {
@@ -50,8 +50,8 @@ bool is_pixel_in_bbox(uint2 pixel_pos, BBox bbox) {
 }
 
 float circle_alpha(uint2 pixel_pos, BBox circle_bbox, float color_alpha) {
-    uint2 circle_center = {lerp(circle_bbox.x_min, circle_bbox.x_max, 0.5), lerp(circle_bbox.y_min, circle_bbox.y_max, 0.5)};
-    float radius = (circle_bbox.x_max - circle_bbox.x_min)*0.5;
+    uint2 circle_center = {lerp(circle_bbox.x0, circle_bbox.x1, 0.5), lerp(circle_bbox.y0, circle_bbox.y1, 0.5)};
+    float radius = (circle_bbox.x1 - circle_bbox.x0)*0.5;
     float d = distance(pixel_pos, circle_center);
     float position_alpha = clamp(radius - d, 0.0, 1.0);
 
@@ -61,7 +61,7 @@ float circle_alpha(uint2 pixel_pos, BBox circle_bbox, float color_alpha) {
 }
 
 float glyph_alpha(uint2 pixel_pos, BBox scene_bbox, BBox atlas_bbox, float color_alpha) {
-    uint2 atlas_pixel_pos = {atlas_bbox.x_min + (pixel_pos.x - scene_bbox.x_min), atlas_bbox.y_min + (pixel_pos.y - scene_bbox.y_min)};
+    uint2 atlas_pixel_pos = {atlas_bbox.x0 + (pixel_pos.x - scene_bbox.x0), atlas_bbox.y0 + (pixel_pos.y - scene_bbox.y0)};
     float glyph_alpha = glyph_atlas[atlas_pixel_pos];
 
     float pixel_alpha = color_alpha*glyph_alpha;

@@ -11,172 +11,30 @@ extern crate font_rs;
 extern crate kurbo;
 extern crate rand;
 
-use kurbo::{Circle, Rect};
-
-use byteorder::{LittleEndian, WriteBytesExt};
+use kurbo::{Circle, Rect, Shape};
 use std::convert::TryFrom;
-use std::mem;
 
-pub enum PietItem {
-    Circle(PietCircle),
-    Glyph(PietGlyph),
-}
+use piet_gpu_types::encoder::{Encode, Encoder};
+use piet_gpu_types::scene::{BBox, SRGBColor, PietCircle, PietGlyph, PietItem};
 
-#[derive(Clone)]
-pub struct BBox {
-    x0: u16,
-    x1: u16,
-    y0: u16,
-    y1: u16,
-}
-
-impl BBox {
-    fn from(bbox: &Rect) -> BBox {
-        // TODO: should more attention be paid to f64 to u16 conversion?
-        BBox {
-            x0: bbox.x0 as u16,
-            x1: bbox.x1 as u16,
-            y0: bbox.y0 as u16,
-            y1: bbox.y1 as u16,
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-
-        bytes
-            .write_u16::<LittleEndian>(self.x0)
-            .expect("could not convert u16 to bytes");
-        bytes
-            .write_u16::<LittleEndian>(self.x1)
-            .expect("could not convert u16 to bytes");
-
-        bytes
-            .write_u16::<LittleEndian>(self.y0)
-            .expect("could not convert u16 to bytes");
-        bytes
-            .write_u16::<LittleEndian>(self.y1)
-            .expect("could not convert u16 to bytes");
-
-        bytes
+fn rect_to_bbox(bbox: &Rect) -> BBox {
+    // TODO: should more attention be paid to f64 to u16 conversion?
+    BBox {
+        x0: bbox.x0 as u16,
+        x1: bbox.x1 as u16,
+        y0: bbox.y0 as u16,
+        y1: bbox.y1 as u16,
     }
 }
 
-pub struct SRGBColor {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-}
-
-impl SRGBColor {
-    fn from(color: &[u8; 4]) -> SRGBColor {
-        SRGBColor {
-            r: color[0],
-            g: color[1],
-            b: color[2],
-            a: color[3],
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        [self.a, self.b, self.g, self.r].iter().map(|&b| b).collect()
+fn bytes_to_color(color: &[u8; 4]) -> SRGBColor {
+    SRGBColor {
+        r: color[0],
+        g: color[1],
+        b: color[2],
+        a: color[3],
     }
 }
-
-pub struct PietGlyph {
-    scene_bbox: BBox,
-    atlas_bbox: BBox,
-    color: SRGBColor,
-}
-
-impl PietGlyph {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-
-        bytes.append(&mut self.scene_bbox.to_bytes());
-        bytes.append(&mut self.atlas_bbox.to_bytes());
-        bytes.append(&mut self.color.to_bytes());
-        bytes.append(&mut Self::padding());
-
-        bytes
-    }
-
-    pub fn size_in_bytes() -> usize {
-        mem::size_of::<Self>()
-    }
-
-    pub fn padding() -> Vec<u8> {
-        // println!("Glyph. PietItem_size: {}, Self_size: {}", PietItem::size_in_bytes(), Self::size_in_bytes());
-        let padding_size = PietItem::size_in_bytes() - Self::size_in_bytes() - 4;
-        vec![0; padding_size]
-    }
-}
-
-pub struct PietCircle {
-    scene_bbox: BBox,
-    color: SRGBColor,
-}
-
-impl PietCircle {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-
-        bytes.append(&mut self.scene_bbox.to_bytes());
-        bytes.append(&mut self.color.to_bytes());
-        bytes.append(&mut Self::padding());
-
-        bytes
-    }
-
-    pub fn size_in_bytes() -> usize {
-        mem::size_of::<Self>()
-    }
-
-    pub fn padding() -> Vec<u8> {
-        // println!("Circle. PietItem_size: {}, Self_size: {}", PietItem::size_in_bytes(), Self::size_in_bytes());
-        let padding_size = PietItem::size_in_bytes() - Self::size_in_bytes() - 4;
-        vec![0; padding_size]
-    }
-}
-
-impl PietItem {
-    pub fn size_in_u32s() -> u32 {
-        let size_in_bytes = Self::size_in_bytes();
-        let size_of_u32_in_bytes = mem::size_of::<u32>();
-
-        // item should always have a size that is an integer number of u32s
-        assert_eq!(size_in_bytes % size_of_u32_in_bytes, 0);
-
-        u32::try_from(size_in_bytes / size_of_u32_in_bytes)
-            .expect("could not safely convert size of item in u32s into a u32 value")
-    }
-
-    pub fn size_in_bytes() -> usize {
-        *([PietCircle::size_in_bytes(), PietGlyph::size_in_bytes()].iter().max().expect("could not determine size of PietItem")) + 4
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-
-        match self {
-            PietItem::Circle(circle) => {
-                bytes
-                    .write_u32::<LittleEndian>(0)
-                    .expect("could not convert u32 to bytes");
-                bytes.append(&mut circle.to_bytes());
-            }
-            PietItem::Glyph(glyph) => {
-                bytes
-                    .write_u32::<LittleEndian>(1)
-                    .expect("could not convert u32 to bytes");
-                bytes.append(&mut glyph.to_bytes());
-            }
-        }
-        bytes
-    }
-}
-
 
 pub struct PlacedGlyph {
     pub atlas_bbox: Rect,
@@ -184,46 +42,32 @@ pub struct PlacedGlyph {
 }
 
 pub struct Scene {
-    pub item_bboxes: Vec<BBox>,
-    pub items: Vec<PietItem>,
+    pub num_items: u32,
+    pub item_bboxes: Encoder,
+    pub items: Encoder,
 }
 
 impl Scene {
     pub fn new_empty() -> Scene {
         Scene {
-            item_bboxes: Vec::new(),
-            items: Vec::new(),
+            num_items: 0,
+            item_bboxes: Encoder::new(),
+            items: Encoder::new(),
         }
-    }
-
-    pub fn to_bytes(&mut self) -> (Vec<u8>, Vec<u8>) {
-        let mut item_bboxes_in_bytes = Vec::<u8>::new();
-        let mut items_in_bytes = Vec::<u8>::new();
-
-        for (bbox, item) in self.item_bboxes.iter().zip(self.items.iter()) {
-            item_bboxes_in_bytes.append(&mut bbox.to_bytes());
-            //println!("{:?}", &mut bbox.to_bytes());
-            items_in_bytes.append(&mut item.to_bytes());
-            //println!("{:?}", &mut item.to_bytes());
-        }
-
-        (item_bboxes_in_bytes, items_in_bytes)
     }
 
     pub fn append_circle(&mut self, circle: Circle, color: [u8; 4]) {
-        let bbox = BBox {
-            x0: (circle.center.x - circle.radius) as u16,
-            x1: (circle.center.x + circle.radius) as u16,
-            y0: (circle.center.y - circle.radius) as u16,
-            y1: (circle.center.y + circle.radius) as u16,
+        let scene_bbox = rect_to_bbox(&circle.bounding_box());
+        scene_bbox.encode(&mut self.item_bboxes);
+
+        let c = PietCircle {
+            scene_bbox,
+            color: bytes_to_color(&color),
         };
+        let item = PietItem::Circle(c);
+        item.encode(&mut self.items);
 
-        self.items.push(PietItem::Circle(PietCircle {
-            scene_bbox: bbox.clone(),
-            color: SRGBColor::from(&color),
-        }));
-
-        self.item_bboxes.push(bbox.clone())
+        self.num_items += 1;
     }
 
     pub fn append_glyph(
@@ -232,13 +76,18 @@ impl Scene {
         atlas_bbox: Rect,
         color: [u8; 4],
     ) {
-        self.items.push(PietItem::Glyph(PietGlyph {
-            scene_bbox: BBox::from(&scene_bbox),
-            atlas_bbox: BBox::from(&atlas_bbox),
-            color: SRGBColor::from(&color),
-        }));
+        let scene_bbox = rect_to_bbox(&scene_bbox);
+        scene_bbox.encode(&mut self.item_bboxes);
 
-        self.item_bboxes.push(BBox::from(&scene_bbox))
+        let g = PietGlyph {
+            scene_bbox,
+            atlas_bbox: rect_to_bbox(&atlas_bbox),
+            color: bytes_to_color(&color),
+        };
+        let item = PietItem::Glyph(g);
+        item.encode(&mut self.items);
+
+        self.num_items += 1;
     }
 
     pub fn add_text(

@@ -1,4 +1,5 @@
 /target
+piet-gpu-types/target
 **/*.rs.bk
 
 .idea

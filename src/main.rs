@@ -14,7 +14,7 @@ pub mod scene;
 pub mod window;
 
 #[macro_use]
-extern crate piet_gpu_derive;
+extern crate piet_gpu_types;
 
 extern crate font_rs;
 extern crate kurbo;
@@ -534,43 +534,43 @@ fn populate_render_context(
     }
 }
 
-piet_gpu! {
-    mod scene {
-        struct BBox {
-            x_min: u16,
-            x_max: u16,
-            y_min: u16,
-            y_max: u16,
-        }
-
-        struct SRGBColor {
-            r: u8,
-            g: u8,
-            b: u8,
-            a: u8,
-        }
-
-        struct PietGlyph {
-            scene_bbox: BBox,
-            atlas_bbox: BBox,
-            color: SRGBColor,
-        }
-
-        struct PietCircle {
-            scene_bbox: BBox,
-            color: SRGBColor,
-        }
-
-        enum PietItem {
-            Circle(PietCircle),
-            Glyph(PietGlyph),
-        }
-    }
-}
+//piet_gpu! {
+//    mod scene {
+//        struct BBox {
+//            x_min: u16,
+//            x_max: u16,
+//            y_min: u16,
+//            y_max: u16,
+//        }
+//
+//        struct SRGBColor {
+//            r: u8,
+//            g: u8,
+//            b: u8,
+//            a: u8,
+//        }
+//
+//        struct PietGlyph {
+//            scene_bbox: BBox,
+//            atlas_bbox: BBox,
+//            color: SRGBColor,
+//        }
+//
+//        struct PietCircle {
+//            scene_bbox: BBox,
+//            color: SRGBColor,
+//        }
+//
+//        enum PietItem {
+//            Circle(PietCircle),
+//            Glyph(PietGlyph),
+//        }
+//    }
+//}
 
 fn main() {
     {
-        let gpu_side_code: String = gen_gpu_scene("HLSL");
+        let gpu_side_code: String = piet_gpu_types::scene::gen_gpu_scene("HLSL");
         let shader_folder = Path::new("shaders");
         let readers_fp = shader_folder.join(Path::new("readers.hlsl"));
         let mut f = File::create(readers_fp).unwrap();
@@ -618,10 +618,10 @@ fn main() {
 
         let scene_circles = generate_random_circles(num_circles, screen_size);
         let scene_text = generate_random_text(num_strings, screen_size);
-        //let scene_circles= Vec::<(kurbo::Circle, DX12Brush)>::new();
-        //let scene_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
-        //let scene_text = generate_test_text();
-        //let scene_circles = generate_circle_test();
+        // let scene_circles= Vec::<(kurbo::Circle, DX12Brush)>::new();
+        // let scene_text = Vec::<(String, kurbo::Point, u32, DX12Brush)>::new();
+        // let scene_text = generate_test_text();
+        // let scene_circles = generate_circle_test();
         let raw_font_generator = Arc::new(RawFontGenerator::load_notomono());
 
         for i in 0..num_renders {
@@ -633,15 +633,11 @@ fn main() {
                 &scene_text,
             );
 
-            let num_items = u32::try_from(render_context.scene.items.len())
-                .expect("cannot store number of items in scene as u32");
-            let (item_bboxes, items) = render_context.scene.to_bytes();
-            //panic!("{:?}, {:?}", item_bboxes, items);
-
+            //panic!("{:?}", render_context.scene.items.buf());
             gpu_state.upload_data(
-                Some(num_items),
-                Some(item_bboxes),
-                Some(items),
+                Some(render_context.scene.num_items),
+                Some(render_context.scene.item_bboxes.buf()),
+                Some(render_context.scene.items.buf()),
                 Some(
                     &render_context
                         .atlas

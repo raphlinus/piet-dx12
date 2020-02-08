@@ -11,7 +11,6 @@ extern crate winapi;
 
 use crate::dx12;
 use crate::error;
-use crate::scene::PietItem;
 use crate::window;
 use kurbo::Rect;
 use std::convert::TryFrom;
@@ -19,6 +18,8 @@ use std::path::Path;
 use std::{mem, ptr};
 use winapi::shared::{dxgi, dxgi1_2, dxgi1_3, dxgiformat, dxgitype, minwindef, winerror};
 use winapi::um::{d3d12, d3dcommon};
+use piet_gpu_types::scene::PietItem;
+use piet_gpu_types::encoder::Encode;
 
 const FRAME_COUNT: u32 = 2;
 pub type VertexCoordinates = [f32; 3];
@@ -473,12 +474,12 @@ impl GpuState {
                 command_queue.clone(),
             );
 
-        let per_tile_command_lists_buffer_size_in_bytes = (PietItem::size_in_bytes() as u32)
+        let per_tile_command_lists_buffer_size_in_bytes = (PietItem::fixed_size() as u32)
             * (max_items_scene + 1)
             * num_tiles_x
             * num_tiles_y;
         let item_bboxes_buffer_size_in_bytes = max_items_scene * 64;
-        let items_buffer_size_in_bytes = max_items_scene * (PietItem::size_in_bytes() as u32);
+        let items_buffer_size_in_bytes = max_items_scene * (PietItem::fixed_size() as u32);
 
         let num_scene_constants = SceneConstants::num_constants();
         let num_gpu_state_constants = GpuStateConstants::num_constants();
@@ -1354,8 +1355,8 @@ impl GpuState {
     pub unsafe fn upload_data(
         &mut self,
         num_items_scene: Option<u32>,
-        item_bboxes: Option<Vec<u8>>,
-        items: Option<Vec<u8>>,
+        item_bboxes: Option<&[u8]>,
+        items: Option<&[u8]>,
         atlas_bytes: Option<&[u8]>,
     ) {
         match num_items_scene {

@@ -19,74 +19,74 @@ typedef uint PietCircleRef;
 typedef uint PietItemRef;
 
 struct BBoxPacked {
-    uint x_min_x_max;
-    uint y_min_y_max;
+    uint x0_x1;
+    uint y0_y1;
 };
 
 inline BBoxPacked BBox_read(ByteAddressBuffer buf, BBoxRef ref) {
     BBoxPacked result;
 
-    uint x_min_x_max = buf.Load(ref);
-    result.x_min_x_max = x_min_x_max;
+    uint x0_x1 = buf.Load(ref);
+    result.x0_x1 = x0_x1;
 
-    uint y_min_y_max = buf.Load(ref + 4);
-    result.y_min_y_max = y_min_y_max;
+    uint y0_y1 = buf.Load(ref + 4);
+    result.y0_y1 = y0_y1;
 
     return result;
 }
 
-inline uint BBox_x_min_x_max(ByteAddressBuffer buf, BBoxRef ref) {
-    uint x_min_x_max = buf.Load(ref);
-    return x_min_x_max;
+inline uint BBox_x0_x1(ByteAddressBuffer buf, BBoxRef ref) {
+    uint x0_x1 = buf.Load(ref);
+    return x0_x1;
 }
 
-inline uint BBox_y_min_y_max(ByteAddressBuffer buf, BBoxRef ref) {
-    uint y_min_y_max = buf.Load(ref + 4);
-    return y_min_y_max;
+inline uint BBox_y0_y1(ByteAddressBuffer buf, BBoxRef ref) {
+    uint y0_y1 = buf.Load(ref + 4);
+    return y0_y1;
 }
 
-inline uint BBox_unpack_x_min(uint x_min_x_max) {
+inline uint BBox_unpack_x0(uint x0_x1) {
     uint result;
 
-    result = extract_16bit_value(0, x_min_x_max);
+    result = extract_16bit_value(0, x0_x1);
     return result;
 }
 
-inline uint BBox_unpack_x_max(uint x_min_x_max) {
+inline uint BBox_unpack_x1(uint x0_x1) {
     uint result;
 
-    result = extract_16bit_value(16, x_min_x_max);
+    result = extract_16bit_value(16, x0_x1);
     return result;
 }
 
-inline uint BBox_unpack_y_min(uint y_min_y_max) {
+inline uint BBox_unpack_y0(uint y0_y1) {
     uint result;
 
-    result = extract_16bit_value(0, y_min_y_max);
+    result = extract_16bit_value(0, y0_y1);
     return result;
 }
 
-inline uint BBox_unpack_y_max(uint y_min_y_max) {
+inline uint BBox_unpack_y1(uint y0_y1) {
     uint result;
 
-    result = extract_16bit_value(16, y_min_y_max);
+    result = extract_16bit_value(16, y0_y1);
     return result;
 }
 
 struct BBox {
-    uint x_min;
-    uint x_max;
-    uint y_min;
-    uint y_max;
+    uint x0;
+    uint x1;
+    uint y0;
+    uint y1;
 };
 
 inline BBox BBox_unpack(BBoxPacked packed_form) {
     BBox result;
 
-    result.x_min = BBox_unpack_x_min(packed_form.x_min_x_max);
-    result.x_max = BBox_unpack_x_max(packed_form.x_min_x_max);
-    result.y_min = BBox_unpack_y_min(packed_form.y_min_y_max);
-    result.y_max = BBox_unpack_y_max(packed_form.y_min_y_max);
+    result.x0 = BBox_unpack_x0(packed_form.x0_x1);
+    result.x1 = BBox_unpack_x1(packed_form.x0_x1);
+    result.y0 = BBox_unpack_y0(packed_form.y0_y1);
+    result.y1 = BBox_unpack_y1(packed_form.y0_y1);
 
     return result;
 }
